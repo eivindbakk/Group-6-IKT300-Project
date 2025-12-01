@@ -1,14 +1,37 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>disable</Nullable>
+        <RootNamespace>Microkernel</RootNamespace>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Contracts\Contracts.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Contracts\Contracts.csproj" />
+    </ItemGroup>
+
+    <!-- Copy plugin DLLs after build -->
+    <Target Name="CopyPlugins" AfterTargets="Build">
+        <Message Text="Copying plugins to output directory..." Importance="High" />
+
+        <!-- Create plugins folder -->
+        <MakeDir Directories="$(OutputPath)plugins" />
+
+        <!-- Copy MetricsLoggerProcess plugin -->
+        <Copy
+                SourceFiles="..\Plugins\MetricsLoggerProcess\bin\$(Configuration)\$(TargetFramework)\MetricsLoggerProcess.dll"
+                DestinationFolder="$(OutputPath)plugins"
+                SkipUnchangedFiles="true"
+                Condition="Exists('. .\Plugins\MetricsLoggerProcess\bin\$(Configuration)\$(TargetFramework)\MetricsLoggerProcess. dll')" />
+
+        <!-- Copy Contracts. dll (needed by plugins) -->
+        <Copy
+                SourceFiles="..\Contracts\bin\$(Configuration)\$(TargetFramework)\Contracts.dll"
+                DestinationFolder="$(OutputPath)plugins"
+                SkipUnchangedFiles="true"
+                Condition="Exists('..\Contracts\bin\$(Configuration)\$(TargetFramework)\Contracts.dll')" />
+    </Target>
 
 </Project>
