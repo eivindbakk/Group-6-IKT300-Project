@@ -1,0 +1,87 @@
+﻿############################
+# OS / General
+############################
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+############################
+# .NET / C#
+############################
+# Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Tt]est[Rr]esult*/
+[Bb]uild/
+x64/
+x86/
+[Aa][Rr][Mm]*/
+[Aa][Rr][Mm]64/
+[Rr]elease*/
+[Dd]ebug*/
+
+# Publish output
+[Pp]ublish/
+*.publishsettings
+
+# NuGet
+*.nupkg
+*.snupkg
+*.nuspec
+packages/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+artifacts/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.rsuser
+
+# Resharper / Rider caches
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+############################
+# JetBrains Rider
+############################
+.idea/
+.idea.*
+*.sln.iml
+
+############################
+# Visual Studio / VS Code
+############################
+.vs/
+.vscode/
+
+############################
+# Tools / Coverage / Analysis
+############################
+# Coverage
+coverage/
+*.coverage
+*.coveragexml
+TestResults/
+
+# Other tool outputs (optional)
+*.cache
+*.pid
