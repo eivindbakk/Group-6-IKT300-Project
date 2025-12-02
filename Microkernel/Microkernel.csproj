@@ -5,33 +5,30 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
-        <RootNamespace>Microkernel</RootNamespace>
+        <AssemblyName>Microkernel</AssemblyName>
     </PropertyGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Contracts\Contracts.csproj" />
     </ItemGroup>
 
-    <!-- Copy plugin DLLs after build -->
-    <Target Name="CopyPlugins" AfterTargets="Build">
-        <Message Text="Copying plugins to output directory..." Importance="High" />
-
-        <!-- Create plugins folder -->
-        <MakeDir Directories="$(OutputPath)plugins" />
-
-        <!-- Copy MetricsLoggerProcess plugin -->
+    <!-- Copy MetricsLogger.exe to output folder after build -->
+    <Target Name="CopyMetricsLogger" AfterTargets="Build">
         <Copy
-                SourceFiles="..\Plugins\MetricsLoggerProcess\bin\$(Configuration)\$(TargetFramework)\MetricsLoggerProcess.dll"
-                DestinationFolder="$(OutputPath)plugins"
+                SourceFiles="..\Plugins\MetricsLoggerProcess\bin\$(Configuration)\net8.0\MetricsLogger.exe"
+                DestinationFolder="$(OutputPath)"
                 SkipUnchangedFiles="true"
-                Condition="Exists('. .\Plugins\MetricsLoggerProcess\bin\$(Configuration)\$(TargetFramework)\MetricsLoggerProcess. dll')" />
-
-        <!-- Copy Contracts. dll (needed by plugins) -->
+                ContinueOnError="true" />
         <Copy
-                SourceFiles="..\Contracts\bin\$(Configuration)\$(TargetFramework)\Contracts.dll"
-                DestinationFolder="$(OutputPath)plugins"
+                SourceFiles="..\Plugins\MetricsLoggerProcess\bin\$(Configuration)\net8.0\MetricsLogger.dll"
+                DestinationFolder="$(OutputPath)"
                 SkipUnchangedFiles="true"
-                Condition="Exists('..\Contracts\bin\$(Configuration)\$(TargetFramework)\Contracts.dll')" />
+                ContinueOnError="true" />
+        <Copy
+                SourceFiles=". .\Plugins\MetricsLoggerProcess\bin\$(Configuration)\net8.0\MetricsLogger.runtimeconfig.json"
+                DestinationFolder="$(OutputPath)"
+                SkipUnchangedFiles="true"
+                ContinueOnError="true" />
     </Target>
 
 </Project>

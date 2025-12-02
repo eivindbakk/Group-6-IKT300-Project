@@ -5,6 +5,8 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
+        <RootNamespace>MetricsLoggerProcess</RootNamespace>
+        <AssemblyName>MetricsLogger</AssemblyName>
     </PropertyGroup>
 
     <ItemGroup>

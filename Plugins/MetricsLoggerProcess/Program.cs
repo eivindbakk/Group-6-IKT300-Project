@@ -1,163 +1,330 @@
 ﻿using System;
-using System. IO. Pipes;
+using System. IO;
+using System. IO.Pipes;
 using System.Text. Json;
 using System.Threading;
 using Contracts;
-using Contracts.Events;
+using Contracts. Events;
 using Contracts.IPC;
 
-namespace Plugins.MetricsLoggerProcess
+namespace MetricsLoggerProcess
 {
     /// <summary>
-    /// Standalone process entry point for MetricsLoggerPlugin.
-    /// Connects to kernel via named pipe IPC. 
+    /// MetricsLogger plugin running as a SEPARATE OS PROCESS. 
+    /// Communicates with the Microkernel via Named Pipes (IPC).
+    /// This satisfies the assignment requirement for process isolation.
     /// </summary>
     class Program
     {
-        private static NamedPipeClientStream _pipeClient;
-        private static MetricsLoggerPlugin _plugin;
-        private static IpcPluginHost _host;
+        private static string _pipeName;
+        private static string _logFilePath;
+        private static int _eventsReceived = 0;
+        private static int _userLoginsLogged = 0;
+        private static int _dataProcessedLogged = 0;
         private static bool _running = true;
 
         static void Main(string[] args)
         {
-            string pipeName = null;
+            Console.WriteLine("[MetricsLogger Process] Starting...");
+            Console.WriteLine("[MetricsLogger Process] PID: " + Environment.ProcessId);
 
-            // Parse command line arguments
-            for (int i = 0; i < args.Length; i++)
+            _pipeName = GetPipeNameFromArgs(args);
+            if (string.IsNullOrEmpty(_pipeName))
             {
-                if (args[i] == "--pipe" && i + 1 < args.Length)
-                {
-                    pipeName = args[i + 1];
-                    break;
-                }
-            }
-
-            if (string.IsNullOrEmpty(pipeName))
-            {
-                Console.Error.WriteLine("Usage: MetricsLoggerProcess --pipe <pipename>");
-                Environment.Exit(1);
+                Console.WriteLine("[MetricsLogger Process] ERROR: No pipe name specified.  Use --pipe <name>");
+                Console.WriteLine("[MetricsLogger Process] Running in standalone mode for testing...");
+                RunStandaloneMode();
                 return;
             }
 
+            Console.WriteLine("[MetricsLogger Process] Connecting to pipe: " + _pipeName);
+
+            SetupLogFile();
+
             try
             {
-                // Connect to kernel via named pipe
-                _pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                _pipeClient.Connect(10000); // 10 second timeout
-
-                Console.WriteLine("Connected to kernel via named pipe.");
-
-                // Create plugin and host
-                _plugin = new MetricsLoggerPlugin();
-                _host = new IpcPluginHost(_pipeClient);
-
-                // Start message loop
-                RunMessageLoop();
+                ConnectAndListen();
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Fatal error: {ex. Message}");
-                Environment.Exit(1);
+                Console.WriteLine("[MetricsLogger Process] Fatal error: " + ex.Message);
+                LogToFile("[FATAL] " + ex.Message);
             }
-            finally
-            {
-                _pipeClient?.Dispose();
-            }
+
+            Console.WriteLine("[MetricsLogger Process] Shutting down...");
+            LogToFile("========================================");
+            LogToFile("MetricsLogger Process Stopped: " + DateTime.Now. ToString("yyyy-MM-dd HH:mm:ss"));
+            LogToFile("Total events received: " + _eventsReceived);
+            LogToFile("UserLoggedInEvent count: " + _userLoginsLogged);
+            LogToFile("DataProcessedEvent count: " + _dataProcessedLogged);
+            LogToFile("========================================");
         }
 
-        static void RunMessageLoop()
+        private static string GetPipeNameFromArgs(string[] args)
         {
-            while (_running && _pipeClient.IsConnected)
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "--pipe" || args[i] == "-p")
+                {
+                    return args[i + 1];
+                }
+            }
+            return null;
+        }
+
+        private static void SetupLogFile()
+        {
+            string logsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ". .", ". .", ". .", ". .", ". .", "Logs");
+            try
+            {
+                logsDir = Path. GetFullPath(logsDir);
+            }
+            catch
+            {
+                logsDir = Path. Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+            }
+
+            if (! Directory.Exists(logsDir))
             {
                 try
                 {
-                    var message = IpcProtocol. ReadMessage(_pipeClient);
-                    if (message == null)
-                    {
-                        Thread.Sleep(10);
-                        continue;
-                    }
-
-                    HandleMessage(message);
+                    Directory.CreateDirectory(logsDir);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console. Error.WriteLine($"Message loop error: {ex.Message}");
+                    logsDir = Path. Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+                    if (!Directory.Exists(logsDir))
+                    {
+                        Directory.CreateDirectory(logsDir);
+                    }
+                }
+            }
+
+            _logFilePath = Path. Combine(logsDir, "metrics_" + DateTime.Now. ToString("yyyy-MM-dd") + ".log");
+
+            LogToFile("========================================");
+            LogToFile("MetricsLogger Process Started: " + DateTime. Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            LogToFile("PID: " + Environment.ProcessId);
+            LogToFile("IPC: Named Pipes");
+            LogToFile("========================================");
+
+            Console.WriteLine("[MetricsLogger Process] Log file: " + _logFilePath);
+        }
+
+        private static void ConnectAndListen()
+        {
+            using (var pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+            {
+                Console.WriteLine("[MetricsLogger Process] Connecting to kernel...");
+                pipeClient.Connect(30000); // 30 second timeout
+                Console.WriteLine("[MetricsLogger Process] Connected to kernel!");
+
+                // Send ready message
+                SendMessage(pipeClient, new IpcMessage
+                {
+                    Type = IpcMessageType. Ack,
+                    PluginName = "MetricsLogger",
+                    Response = "Ready"
+                });
+
+                // Start heartbeat thread
+                var heartbeatThread = new Thread(() => SendHeartbeats(pipeClient));
+                heartbeatThread.IsBackground = true;
+                heartbeatThread. Start();
+
+                // Listen for messages from kernel
+                while (_running && pipeClient.IsConnected)
+                {
+                    try
+                    {
+                        var message = IpcProtocol.ReadMessage(pipeClient);
+                        if (message == null)
+                        {
+                            Thread.Sleep(10);
+                            continue;
+                        }
+
+                        HandleMessage(pipeClient, message);
+                    }
+                    catch (IOException)
+                    {
+                        Console.WriteLine("[MetricsLogger Process] Pipe disconnected.");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[MetricsLogger Process] Error: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private static void SendHeartbeats(NamedPipeClientStream pipe)
+        {
+            while (_running && pipe.IsConnected)
+            {
+                try
+                {
+                    Thread.Sleep(5000);
+                    if (pipe.IsConnected)
+                    {
+                        SendMessage(pipe, new IpcMessage
+                        {
+                            Type = IpcMessageType.Heartbeat,
+                            PluginName = "MetricsLogger"
+                        });
+                    }
+                }
+                catch
+                {
                     break;
                 }
             }
         }
 
-        static void HandleMessage(IpcMessage message)
+        private static void HandleMessage(NamedPipeClientStream pipe, IpcMessage message)
         {
             switch (message.Type)
             {
+                case IpcMessageType. Event:
+                    HandleEvent(message. Event);
+                    break;
+
                 case IpcMessageType.Start:
-                    _plugin.Start(_host);
-                    SendAck("Started");
+                    Console.WriteLine("[MetricsLogger Process] Received START command.");
+                    LogToFile("[COMMAND] Start received");
                     break;
 
-                case IpcMessageType. Stop:
-                    _plugin.Stop();
-                    SendAck("Stopped");
+                case IpcMessageType.Stop:
+                    Console.WriteLine("[MetricsLogger Process] Received STOP command.");
+                    LogToFile("[COMMAND] Stop received");
                     break;
 
-                case IpcMessageType.Event:
-                    if (message.Event != null)
-                    {
-                        _plugin.HandleEvent(message.Event);
-                    }
-                    break;
-
-                case IpcMessageType. Shutdown:
-                    _plugin.Stop();
+                case IpcMessageType.Shutdown:
+                    Console.WriteLine("[MetricsLogger Process] Received SHUTDOWN command.");
+                    LogToFile("[COMMAND] Shutdown received");
                     _running = false;
+                    break;
+
+                default:
+                    Console.WriteLine("[MetricsLogger Process] Unknown message type: " + message.Type);
                     break;
             }
         }
 
-        static void SendAck(string response)
+        private static void HandleEvent(EventMessage evt)
         {
-            var ack = new IpcMessage
+            if (evt == null) return;
+
+            _eventsReceived++;
+
+            string topic = evt.Topic ??  "";
+            string payload = evt.Payload ?? "";
+            DateTime timestamp = evt.Timestamp != default ? evt.Timestamp : DateTime.Now;
+
+            string logLine;
+            string consoleMessage;
+
+            // Handle UserLoggedInEvent (REQUIRED by assignment)
+            if (topic. Equals("UserLoggedInEvent", StringComparison.OrdinalIgnoreCase))
             {
-                Type = IpcMessageType.Ack,
-                Response = response
-            };
-            IpcProtocol. WriteMessage(_pipeClient, ack);
-        }
-    }
-
-    /// <summary>
-    /// IPluginHost implementation that communicates back to kernel via IPC.
-    /// </summary>
-    class IpcPluginHost : IPluginHost
-    {
-        private readonly NamedPipeClientStream _pipe;
-
-        public IpcPluginHost(NamedPipeClientStream pipe)
-        {
-            _pipe = pipe;
-        }
-
-        public void Publish(EventMessage evt)
-        {
-            var message = new IpcMessage
+                _userLoginsLogged++;
+                var userEvent = Deserialize<UserLoggedInEvent>(payload);
+                if (userEvent != null)
+                {
+                    logLine = "[" + timestamp. ToString("yyyy-MM-dd HH:mm:ss") + "] [UserLoggedInEvent] User: " + userEvent. Username + " (ID: " + userEvent.UserId + "), IP: " + userEvent.IpAddress + ", Session: " + userEvent.SessionId;
+                    consoleMessage = "[UserLoggedInEvent] User '" + userEvent. Username + "' logged in from " + userEvent. IpAddress;
+                }
+                else
+                {
+                    logLine = "[" + timestamp. ToString("yyyy-MM-dd HH:mm:ss") + "] [UserLoggedInEvent] " + payload;
+                    consoleMessage = "[UserLoggedInEvent] " + payload;
+                }
+            }
+            // Handle DataProcessedEvent (REQUIRED by assignment)
+            else if (topic.Equals("DataProcessedEvent", StringComparison.OrdinalIgnoreCase))
             {
-                Type = IpcMessageType.Publish,
-                Event = evt
-            };
-            IpcProtocol. WriteMessage(_pipe, message);
+                _dataProcessedLogged++;
+                var dataEvent = Deserialize<DataProcessedEvent>(payload);
+                if (dataEvent != null)
+                {
+                    string status = dataEvent.Success ? "SUCCESS" : "FAILED";
+                    logLine = "[" + timestamp.ToString("yyyy-MM-dd HH:mm:ss") + "] [DataProcessedEvent] [" + status + "] Source: " + dataEvent.DataSource + ", Records: " + dataEvent.RecordsProcessed + ", Time: " + dataEvent.ProcessingTimeMs. ToString("F2") + "ms";
+                    if (dataEvent.Success)
+                    {
+                        consoleMessage = "[DataProcessedEvent] SUCCESS: " + dataEvent.RecordsProcessed + " records from " + dataEvent. DataSource + " (" + dataEvent. ProcessingTimeMs. ToString("F2") + "ms)";
+                    }
+                    else
+                    {
+                        consoleMessage = "[DataProcessedEvent] FAILED: " + dataEvent.DataSource + " - " + dataEvent. ErrorMessage;
+                    }
+                }
+                else
+                {
+                    logLine = "[" + timestamp.ToString("yyyy-MM-dd HH:mm:ss") + "] [DataProcessedEvent] " + payload;
+                    consoleMessage = "[DataProcessedEvent] " + payload;
+                }
+            }
+            // Handle metrics
+            else if (topic.StartsWith("metrics", StringComparison. OrdinalIgnoreCase))
+            {
+                logLine = "[" + timestamp.ToString("yyyy-MM-dd HH:mm:ss") + "] [METRIC] " + topic + ": " + payload;
+                consoleMessage = "[METRIC] " + topic + ": " + payload;
+            }
+            // Handle other events
+            else
+            {
+                logLine = "[" + timestamp.ToString("yyyy-MM-dd HH:mm:ss") + "] [EVENT] " + topic + ": " + payload;
+                consoleMessage = "[EVENT] " + topic + ": " + payload;
+            }
+
+            LogToFile(logLine);
+            Console. WriteLine("[MetricsLogger Process] " + consoleMessage);
         }
 
-        public void Log(string message)
+        private static T Deserialize<T>(string json) where T : class
         {
-            var ipcMessage = new IpcMessage
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try
             {
-                Type = IpcMessageType.Log,
-                Response = message
-            };
-            IpcProtocol.WriteMessage(_pipe, ipcMessage);
+                return JsonSerializer. Deserialize<T>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void SendMessage(NamedPipeClientStream pipe, IpcMessage message)
+        {
+            try
+            {
+                IpcProtocol. WriteMessage(pipe, message);
+            }
+            catch (Exception ex)
+            {
+                Console. WriteLine("[MetricsLogger Process] SendMessage error: " + ex.Message);
+            }
+        }
+
+        private static void LogToFile(string content)
+        {
+            try
+            {
+                File.AppendAllText(_logFilePath, content + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        private static void RunStandaloneMode()
+        {
+            SetupLogFile();
+            Console.WriteLine("[MetricsLogger Process] Running in standalone test mode.");
+            Console.WriteLine("[MetricsLogger Process] Press Enter to exit...");
+            Console.ReadLine();
         }
     }
 }

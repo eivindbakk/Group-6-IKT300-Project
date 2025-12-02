@@ -3,7 +3,7 @@
 namespace Contracts.Events
 {
     /// <summary>
-    /// Event raised when data has been processed (as per assignment requirements).
+    /// Event raised when data has been processed (required by assignment). 
     /// </summary>
     public class DataProcessedEvent
     {
@@ -18,7 +18,7 @@ namespace Contracts.Events
         public DataProcessedEvent()
         {
             ProcessId = Guid.NewGuid().ToString();
-            ProcessedAt = DateTime. UtcNow;
+            ProcessedAt = DateTime.UtcNow;
             Success = true;
         }
     }
