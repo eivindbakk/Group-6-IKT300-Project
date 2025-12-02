@@ -1,12 +1,11 @@
 using System;
-using System. Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System. Threading;
-using System.Threading.Tasks;
+using System. Globalization;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System. Threading.Tasks;
 using Contracts;
 
-namespace Plugins. EventGeneratorPlugin
+namespace Plugins.EventGeneratorPlugin
 {
     public class EventGeneratorPlugin : IPlugin
     {
@@ -14,7 +13,7 @@ namespace Plugins. EventGeneratorPlugin
         private CancellationTokenSource _cts;
         private Task _generatorTask;
         private Random _random;
-        
+
         private int _intervalSeconds = 10;
         private bool _isRunning = false;
         private int _eventsGenerated = 0;
@@ -31,66 +30,32 @@ namespace Plugins. EventGeneratorPlugin
 
         public string Description
         {
-            get { return "Automatically generates system metrics at regular intervals."; }
+            get { return "Generates system metrics on demand.  Use 'start EventGenerator' to begin. "; }
         }
 
         public PluginHelpInfo GetHelp()
         {
             var help = new PluginHelpInfo
             {
-                DetailedDescription = 
-                    "The EventGenerator plugin collects real system metrics (CPU, memory, disk usage) " +
-                    "and publishes them to the message bus at configurable intervals. It also monitors " +
-                    "thresholds and automatically generates alerts when resources are running high."
+                DetailedDescription =
+                    "The EventGenerator plugin collects system metrics (CPU usage, memory usage, disk activity) " +
+                    "and publishes them to the message bus at configurable intervals. " +
+                    "Metrics generation is OFF by default."
             };
 
-            // Commands
-            help.Commands.Add(new PluginCommand
-            {
-                Topic = "generator.start",
-                Description = "Start generating metrics"
-            });
-            help.Commands. Add(new PluginCommand
-            {
-                Topic = "generator.stop",
-                Description = "Stop generating metrics"
-            });
-            help. Commands.Add(new PluginCommand
-            {
-                Topic = "generator.now",
-                Description = "Generate one metric immediately"
-            });
-            help.Commands. Add(new PluginCommand
-            {
-                Topic = "generator.interval",
-                Description = "Set the generation interval",
-                PayloadFormat = "<seconds>"
-            });
+            help.Commands. Add(new PluginCommand { Topic = "start EventGenerator", Description = "Start generating metrics" });
+            help.Commands.Add(new PluginCommand { Topic = "stop EventGenerator", Description = "Stop generating metrics" });
+            help.Commands. Add(new PluginCommand { Topic = "send generator. now", Description = "Generate one metric immediately" });
+            help. Commands.Add(new PluginCommand { Topic = "send generator.interval", Description = "Set interval (e.g.  send generator.interval 5)", PayloadFormat = "<seconds>" });
 
-            // Handled topics (what this plugin listens to)
-            help.HandledTopics.Add("generator.start  - Start generating");
-            help.HandledTopics.Add("generator.stop   - Stop generating");
-            help.HandledTopics.Add("generator.now    - Generate immediately");
-            help. HandledTopics. Add("generator.interval <N> - Set interval");
-
-            // Notes
             help.Notes. Add("Publishes to: metrics.system");
             help. Notes.Add("Payload format: {\"cpu\": N, \"memory\": N, \"disk\": N}");
-            help.Notes. Add("Default interval: 10 seconds");
-            help.Notes.Add("");
-            help.Notes.Add("Alert Thresholds:");
-            help.Notes.Add("  CPU > 75%:    alert. warning");
-            help. Notes.Add("  CPU > 90%:    alert.critical");
-            help.Notes. Add("  Memory > 80%: alert.warning");
-            help.Notes. Add("  Memory > 90%: alert.critical");
-            help.Notes.Add("  Disk > 85%:   alert. warning");
-            help.Notes.Add("  Disk > 95%:   alert. critical");
+            help.Notes.Add("Default interval: 10 seconds");
 
-            // Examples
-            help. Examples.Add("send generator.start");
-            help.Examples.Add("send generator.stop");
-            help. Examples.Add("send generator.now");
-            help.Examples. Add("send generator. interval 5");
+            help.Examples.Add("start EventGenerator");
+            help.Examples.Add("stop EventGenerator");
+            help.Examples.Add("send generator.now");
+            help. Examples.Add("send generator.interval 5");
 
             return help;
         }
@@ -101,9 +66,7 @@ namespace Plugins. EventGeneratorPlugin
             _random = new Random();
             _eventsGenerated = 0;
 
-            _host.Log("EventGenerator started. Interval: " + _intervalSeconds + "s");
-
-            StartGenerating();
+            _host.Log("EventGenerator loaded. Use 'start EventGenerator' to begin.");
         }
 
         public void Stop()
@@ -112,7 +75,7 @@ namespace Plugins. EventGeneratorPlugin
 
             if (_host != null)
             {
-                _host.Log("EventGenerator stopped.  Events generated: " + _eventsGenerated);
+                _host.Log("EventGenerator stopped. Events generated: " + _eventsGenerated);
             }
         }
 
@@ -123,14 +86,14 @@ namespace Plugins. EventGeneratorPlugin
             if (evt.Topic. Equals("generator.start", StringComparison.OrdinalIgnoreCase))
             {
                 StartGenerating();
-                _host.Log("EventGenerator: Started.");
+                if (_host != null) _host.Log("EventGenerator: Started.  Interval: " + _intervalSeconds + "s");
             }
-            else if (evt. Topic.Equals("generator.stop", StringComparison.OrdinalIgnoreCase))
+            else if (evt.Topic. Equals("generator. stop", StringComparison.OrdinalIgnoreCase))
             {
                 StopGenerating();
-                _host.Log("EventGenerator: Stopped.");
+                if (_host != null) _host. Log("EventGenerator: Stopped.");
             }
-            else if (evt.Topic.Equals("generator.now", StringComparison.OrdinalIgnoreCase))
+            else if (evt. Topic.Equals("generator.now", StringComparison.OrdinalIgnoreCase))
             {
                 GenerateAndPublishMetrics();
             }
@@ -140,8 +103,8 @@ namespace Plugins. EventGeneratorPlugin
                 if (int.TryParse(evt.Payload, out newInterval) && newInterval > 0)
                 {
                     _intervalSeconds = newInterval;
-                    _host.Log("EventGenerator: Interval set to " + _intervalSeconds + "s");
-                    
+                    if (_host != null) _host.Log("EventGenerator: Interval set to " + _intervalSeconds + "s");
+
                     if (_isRunning)
                     {
                         StopGenerating();
@@ -179,10 +142,9 @@ namespace Plugins. EventGeneratorPlugin
                 }
                 catch (AggregateException)
                 {
-                    // Expected when cancelled
                 }
 
-                _cts.Dispose();
+                _cts. Dispose();
                 _cts = null;
             }
         }
@@ -213,10 +175,10 @@ namespace Plugins. EventGeneratorPlugin
         private void GenerateAndPublishMetrics()
         {
             double cpuUsage = GetCpuUsage();
-            double memoryUsage = GetMemoryUsage();
-            double diskUsage = GetDiskUsage();
+            double memoryUsage = GetSystemMemoryUsage();
+            double diskUsage = GetDiskActivity();
 
-            string payload = string.Format(
+            string payload = string.Format(CultureInfo.InvariantCulture,
                 "{{\"cpu\": {0:F1}, \"memory\": {1:F1}, \"disk\": {2:F1}}}",
                 cpuUsage,
                 memoryUsage,
@@ -226,7 +188,7 @@ namespace Plugins. EventGeneratorPlugin
             {
                 Topic = "metrics.system",
                 Payload = payload,
-                Timestamp = DateTime. UtcNow,
+                Timestamp = DateTime.UtcNow,
                 Source = Name
             };
 
@@ -244,29 +206,29 @@ namespace Plugins. EventGeneratorPlugin
         {
             if (cpu > 90)
             {
-                PublishAlert("alert.critical", "CPU critical: " + cpu. ToString("F1") + "%");
+                PublishAlert("alert.critical", "CPU critical: " + cpu. ToString("F1", CultureInfo.InvariantCulture) + "%");
             }
             else if (cpu > 75)
             {
-                PublishAlert("alert.warning", "CPU high: " + cpu. ToString("F1") + "%");
+                PublishAlert("alert.warning", "CPU high: " + cpu. ToString("F1", CultureInfo.InvariantCulture) + "%");
             }
 
             if (memory > 90)
             {
-                PublishAlert("alert.critical", "Memory critical: " + memory.ToString("F1") + "%");
+                PublishAlert("alert.critical", "Memory critical: " + memory.ToString("F1", CultureInfo.InvariantCulture) + "%");
             }
             else if (memory > 80)
             {
-                PublishAlert("alert.warning", "Memory high: " + memory.ToString("F1") + "%");
+                PublishAlert("alert.warning", "Memory high: " + memory.ToString("F1", CultureInfo.InvariantCulture) + "%");
             }
 
-            if (disk > 95)
+            if (disk > 90)
             {
-                PublishAlert("alert.critical", "Disk critical: " + disk.ToString("F1") + "%");
+                PublishAlert("alert.critical", "Disk activity critical: " + disk.ToString("F1", CultureInfo. InvariantCulture) + "%");
             }
-            else if (disk > 85)
+            else if (disk > 75)
             {
-                PublishAlert("alert. warning", "Disk high: " + disk.ToString("F1") + "%");
+                PublishAlert("alert.warning", "Disk activity high: " + disk.ToString("F1", CultureInfo. InvariantCulture) + "%");
             }
         }
 
@@ -288,50 +250,73 @@ namespace Plugins. EventGeneratorPlugin
 
         private double GetCpuUsage()
         {
-            double baseUsage = 20 + (_random.NextDouble() * 40);
-            
+            double baseUsage = 5 + (_random.NextDouble() * 20);
+
             if (_random.Next(10) == 0)
             {
-                baseUsage = 70 + (_random.NextDouble() * 25);
+                baseUsage = 25 + (_random.NextDouble() * 25);
+            }
+
+            if (_random.Next(20) == 0)
+            {
+                baseUsage = 50 + (_random.NextDouble() * 30);
             }
 
             return Math.Min(100, baseUsage);
         }
 
-        private double GetMemoryUsage()
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MEMORYSTATUSEX
         {
-            try
-            {
-                Process currentProcess = Process.GetCurrentProcess();
-                long usedMemory = currentProcess.WorkingSet64;
-                long totalMemory = 8L * 1024 * 1024 * 1024;
-                
-                double percentage = (usedMemory / (double)totalMemory) * 100;
-                percentage += (_random.NextDouble() * 20) + 30;
-                
-                return Math.Min(100, percentage);
-            }
-            catch
-            {
-                return 40 + (_random.NextDouble() * 30);
-            }
+            public uint dwLength;
+            public uint dwMemoryLoad;
+            public ulong ullTotalPhys;
+            public ulong ullAvailPhys;
+            public ulong ullTotalPageFile;
+            public ulong ullAvailPageFile;
+            public ulong ullTotalVirtual;
+            public ulong ullAvailVirtual;
+            public ulong ullAvailExtendedVirtual;
         }
 
-        private double GetDiskUsage()
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+        private double GetSystemMemoryUsage()
         {
             try
             {
-                DriveInfo drive = new DriveInfo("C");
-                long totalSpace = drive.TotalSize;
-                long freeSpace = drive. AvailableFreeSpace;
-                long usedSpace = totalSpace - freeSpace;
+                MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
+                memStatus.dwLength = (uint)Marshal. SizeOf(typeof(MEMORYSTATUSEX));
 
-                return (usedSpace / (double)totalSpace) * 100;
+                if (GlobalMemoryStatusEx(ref memStatus))
+                {
+                    return memStatus. dwMemoryLoad;
+                }
             }
             catch
             {
-                return 50 + (_random. NextDouble() * 20);
             }
+
+            return 0;
+        }
+
+        private double GetDiskActivity()
+        {
+            double baseActivity = 0.5 + (_random. NextDouble() * 2.0);
+
+            if (_random.Next(100) < 15)
+            {
+                baseActivity = 3.0 + (_random.NextDouble() * 5.0);
+            }
+
+            if (_random.Next(100) < 5)
+            {
+                baseActivity = 10.0 + (_random.NextDouble() * 20.0);
+            }
+
+            return Math.Min(100, baseActivity);
         }
     }
 }

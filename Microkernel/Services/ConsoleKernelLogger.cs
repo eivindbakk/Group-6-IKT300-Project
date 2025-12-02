@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Threading;
 
 namespace Microkernel.Services
 {
@@ -9,6 +8,9 @@ namespace Microkernel.Services
         private static string _currentInput = "";
         private static int _cursorPos = 0;
         private static bool _isPromptActive = false;
+
+        // New: mute flag - if true, plugin logs and forwarded subscriptions are suppressed
+        private static bool _isMuted = false;
 
         public static void SetPromptState(bool active, string currentInput = "", int cursorPos = 0)
         {
@@ -23,23 +25,37 @@ namespace Microkernel.Services
             _cursorPos = cursorPos;
         }
 
+        public static void SetMuted(bool muted)
+        {
+            _isMuted = muted;
+        }
+
+        public static bool IsMuted()
+        {
+            return _isMuted;
+        }
+
         public void Debug(string message)
         {
+            if (_isMuted) return;
             Log("DEBUG", message, ConsoleColor.Gray);
         }
 
         public void Info(string message)
         {
+            if (_isMuted) return;
             Log("INFO ", message, ConsoleColor.White);
         }
 
         public void Warn(string message)
         {
-            Log("WARN ", message, ConsoleColor. Yellow);
+            if (_isMuted) return;
+            Log("WARN ", message, ConsoleColor.Yellow);
         }
 
         public void Error(string message)
         {
+            if (_isMuted) return;
             Log("ERROR", message, ConsoleColor.Red);
         }
 
@@ -47,36 +63,31 @@ namespace Microkernel.Services
         {
             lock (_lock)
             {
-                // Save current state
                 bool wasPromptActive = _isPromptActive;
                 string savedInput = _currentInput;
                 int savedCursorPos = _cursorPos;
 
                 try
                 {
-                    // If prompt is active, clear the current line first
                     if (wasPromptActive)
                     {
                         ClearCurrentLine();
                     }
 
-                    // Write the log message
-                    string timestamp = DateTime.Now. ToString("HH:mm:ss.fff");
-                    
+                    string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+
                     Console.ForegroundColor = ConsoleColor.DarkGray;
                     Console.Write("[" + timestamp + "] ");
-                    
+
                     Console.ForegroundColor = color;
                     Console.Write("[" + level + "] ");
-                    
-                    Console. ResetColor();
+
+                    Console.ResetColor();
                     Console.WriteLine(message);
 
-                    // Restore prompt if it was active
                     if (wasPromptActive)
                     {
                         Console.Write("> " + savedInput);
-                        // Position cursor correctly
                         if (savedCursorPos < savedInput.Length)
                         {
                             int moveBack = savedInput.Length - savedCursorPos;
@@ -95,16 +106,9 @@ namespace Microkernel.Services
         {
             try
             {
-                // Calculate total length: "> " + input
                 int totalLength = 2 + _currentInput.Length;
-                
-                // Move to start of line
                 Console.Write("\r");
-                
-                // Clear the line
-                Console. Write(new string(' ', totalLength));
-                
-                // Move back to start
+                Console.Write(new string(' ', totalLength));
                 Console.Write("\r");
             }
             catch

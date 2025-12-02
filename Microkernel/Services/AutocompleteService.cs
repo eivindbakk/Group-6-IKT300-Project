@@ -1,18 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using System. Linq;
 using Microkernel.Core;
 
 namespace Microkernel.Services
 {
-    /// <summary>
-    /// Provides autocomplete functionality for the console.
-    /// Follows Single Responsibility Principle - only handles autocomplete logic.
-    /// </summary>
     public class AutocompleteService
     {
         private readonly Kernel _kernel;
-        private readonly string[] _commands = { "help", "status", "plugins", "send", "exit", "quit", "list" };
+        private readonly string[] _commands = { "help", "status", "plugins", "send", "exit", "quit", "list", "subscribe", "unsubscribe", "subscriptions", "filter", "unfilter", "filters", "mute", "unmute", "unload", "start", "stop", "crash", "restart" };
 
         public AutocompleteService(Kernel kernel)
         {
@@ -21,40 +17,52 @@ namespace Microkernel.Services
 
         public string TryAutocomplete(string input)
         {
-            if (string.IsNullOrEmpty(input))
+            if (string. IsNullOrEmpty(input))
             {
                 return input;
             }
 
-            string[] parts = input.Split(new[] { ' ' }, StringSplitOptions. RemoveEmptyEntries);
+            string[] parts = input. Split(new[] { ' ' }, StringSplitOptions. RemoveEmptyEntries);
 
-            // Command autocomplete
-            if (parts.Length == 1 && ! input.EndsWith(" "))
+            if (parts. Length == 0) return input;
+
+            if (parts. Length == 1 && ! input.EndsWith(" "))
             {
-                string match = _commands.FirstOrDefault(c => 
-                    c. StartsWith(parts[0], StringComparison.OrdinalIgnoreCase));
+                string match = _commands.FirstOrDefault(c =>
+                    c.StartsWith(parts[0], StringComparison.OrdinalIgnoreCase));
                 if (match != null)
                 {
                     return match;
                 }
             }
 
-            // Help + plugin name autocomplete
-            if (parts.Length >= 1 && parts[0]. Equals("help", StringComparison.OrdinalIgnoreCase))
+            string cmd = parts[0]. ToLowerInvariant();
+
+            // Commands that take a plugin name as argument
+            if (cmd == "help" || cmd == "unload" || cmd == "crash" || cmd == "restart" || cmd == "start" || cmd == "stop")
             {
-                return AutocompleteHelp(input, parts);
+                return AutocompletePluginName(input, parts, cmd);
             }
 
-            // Send + topic autocomplete
-            if (parts.Length >= 1 && parts[0].Equals("send", StringComparison.OrdinalIgnoreCase))
+            if (cmd == "send")
             {
                 return AutocompleteSend(input, parts);
+            }
+
+            if (cmd == "subscribe")
+            {
+                return AutocompleteSubscribe(input, parts);
+            }
+
+            if (cmd == "filter")
+            {
+                return AutocompleteFilter(input, parts);
             }
 
             return input;
         }
 
-        private string AutocompleteHelp(string input, string[] parts)
+        private string AutocompletePluginName(string input, string[] parts, string command)
         {
             var plugins = _kernel.GetLoadedPlugins();
 
@@ -62,16 +70,16 @@ namespace Microkernel.Services
             {
                 if (plugins.Count > 0)
                 {
-                    return "help " + plugins[0].Name;
+                    return command + " " + plugins[0].Name;
                 }
             }
-            else if (parts.Length == 2)
+            else if (parts.Length == 2 && ! input.EndsWith(" "))
             {
                 var match = plugins.FirstOrDefault(p =>
-                    p. Name.StartsWith(parts[1], StringComparison.OrdinalIgnoreCase));
+                    p.Name.StartsWith(parts[1], StringComparison.OrdinalIgnoreCase));
                 if (match != null)
                 {
-                    return "help " + match.Name;
+                    return command + " " + match.Name;
                 }
             }
 
@@ -80,20 +88,62 @@ namespace Microkernel.Services
 
         private string AutocompleteSend(string input, string[] parts)
         {
-            // Get topics from all plugins
             var allTopics = GetAllTopics();
 
             if (parts. Length == 1 && input.EndsWith(" "))
             {
                 return "send metrics.";
             }
-            else if (parts. Length == 2 && ! input.EndsWith(" "))
+            else if (parts. Length == 2 && !input.EndsWith(" "))
             {
-                var match = allTopics.FirstOrDefault(t =>
-                    t. StartsWith(parts[1], StringComparison.OrdinalIgnoreCase));
+                var match = allTopics. FirstOrDefault(t =>
+                    t.StartsWith(parts[1], StringComparison.OrdinalIgnoreCase));
                 if (match != null)
                 {
                     return "send " + match;
+                }
+            }
+
+            return input;
+        }
+
+        private string AutocompleteSubscribe(string input, string[] parts)
+        {
+            var subTopics = new List<string> { "metrics.*", "alert.*", "*" };
+            subTopics.AddRange(GetAllTopics());
+
+            if (parts.Length == 1 && input. EndsWith(" "))
+            {
+                return "subscribe metrics.*";
+            }
+            else if (parts.Length == 2 && !input. EndsWith(" "))
+            {
+                var match = subTopics.FirstOrDefault(t =>
+                    t.StartsWith(parts[1], StringComparison. OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    return "subscribe " + match;
+                }
+            }
+
+            return input;
+        }
+
+        private string AutocompleteFilter(string input, string[] parts)
+        {
+            var filterPatterns = new List<string> { "metrics.*", "alert.*", "alert. critical", "alert.warning", "*" };
+
+            if (parts. Length == 1 && input.EndsWith(" "))
+            {
+                return "filter metrics.*";
+            }
+            else if (parts.Length == 2 && !input.EndsWith(" "))
+            {
+                var match = filterPatterns.FirstOrDefault(t =>
+                    t.StartsWith(parts[1], StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    return "filter " + match;
                 }
             }
 
@@ -104,7 +154,6 @@ namespace Microkernel.Services
         {
             var topics = new List<string>
             {
-                // Default topics
                 "metrics.cpu",
                 "metrics.memory",
                 "metrics.system",
@@ -113,7 +162,6 @@ namespace Microkernel.Services
                 "alert.critical"
             };
 
-            // Get topics from plugins
             foreach (var pluginInfo in _kernel.GetLoadedPlugins())
             {
                 var plugin = _kernel. GetPlugin(pluginInfo.Name);
@@ -122,7 +170,7 @@ namespace Microkernel.Services
                     var help = plugin.GetHelp();
                     foreach (var cmd in help.Commands)
                     {
-                        if (! topics.Contains(cmd.Topic))
+                        if (! string.IsNullOrWhiteSpace(cmd. Topic) && !topics.Contains(cmd.Topic))
                         {
                             topics.Add(cmd.Topic);
                         }

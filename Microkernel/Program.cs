@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System. Collections.Generic;
 using System.Threading;
 using Microkernel.Core;
 using Microkernel.Services;
@@ -8,7 +8,7 @@ namespace Microkernel
 {
     /// <summary>
     /// Main program entry point.
-    /// Responsibility: Console UI only - input/output handling.
+    /// Responsibility: Console UI only - input/output handling. 
     /// </summary>
     class Program
     {
@@ -58,12 +58,12 @@ namespace Microkernel
             _kernel.Start();
 
             Console.WriteLine();
-            HelpRenderer.RenderGeneralHelp();
+            HelpRenderer.RenderGeneralHelp(_kernel. GetLoadedPlugins());
         }
 
         private static void Shutdown()
         {
-            Console.WriteLine("\nShutting down...");
+            Console.WriteLine("\nShutting down.. .");
             if (_kernel != null)
             {
                 _kernel.Stop();
@@ -73,7 +73,7 @@ namespace Microkernel
 
         private static void RunInteractiveLoop()
         {
-            while (!_exitEvent. WaitOne(0))
+            while (!_exitEvent.WaitOne(0))
             {
                 Console.Write("\n> ");
                 ConsoleKernelLogger.SetPromptState(true, "", 0);
@@ -93,7 +93,7 @@ namespace Microkernel
                     _commandHistory.Add(input);
                     _historyIndex = _commandHistory.Count;
 
-                    bool shouldExit = _commandHandler. ProcessCommand(input);
+                    bool shouldExit = _commandHandler.ProcessCommand(input);
                     if (shouldExit)
                     {
                         break;
@@ -118,7 +118,7 @@ namespace Microkernel
                     continue;
                 }
 
-                ConsoleKeyInfo key = Console. ReadKey(true);
+                ConsoleKeyInfo key = Console.ReadKey(true);
 
                 switch (key.Key)
                 {
@@ -126,27 +126,27 @@ namespace Microkernel
                         Console.WriteLine();
                         return input;
 
-                    case ConsoleKey.Tab:
-                        string completed = _autocomplete. TryAutocomplete(input);
+                    case ConsoleKey. Tab:
+                        string completed = _autocomplete.TryAutocomplete(input);
                         if (completed != input)
                         {
-                            ClearInput(input. Length);
+                            ClearInput(input.Length);
                             input = completed;
-                            cursorPos = input.Length;
+                            cursorPos = input. Length;
                             Console.Write(input);
                         }
                         break;
 
-                    case ConsoleKey. Backspace:
+                    case ConsoleKey.Backspace:
                         if (cursorPos > 0)
                         {
-                            input = input.Substring(0, cursorPos - 1) + input.Substring(cursorPos);
+                            input = input. Substring(0, cursorPos - 1) + input. Substring(cursorPos);
                             cursorPos--;
                             Console.Write("\b \b");
                         }
                         break;
 
-                    case ConsoleKey. UpArrow:
+                    case ConsoleKey.UpArrow:
                         if (_historyIndex > 0)
                         {
                             _historyIndex--;
@@ -175,14 +175,14 @@ namespace Microkernel
                         }
                         break;
 
-                    case ConsoleKey. Escape:
+                    case ConsoleKey.Escape:
                         return null;
 
                     default:
                         if (! char.IsControl(key.KeyChar))
                         {
-                            input = input. Substring(0, cursorPos) + key. KeyChar + input.Substring(cursorPos);
-                            Console.Write(key.KeyChar);
+                            input = input.Substring(0, cursorPos) + key.KeyChar + input.Substring(cursorPos);
+                            Console. Write(key.KeyChar);
                             cursorPos++;
                         }
                         break;
