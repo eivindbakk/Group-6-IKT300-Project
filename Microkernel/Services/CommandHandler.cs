@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using System. Linq;
+using System.Text. Json;
 using Contracts;
+using Contracts.Events;
 using Microkernel.Core;
 
 namespace Microkernel.Services
@@ -26,7 +28,7 @@ namespace Microkernel.Services
             }
 
             string[] parts = input.Split(new[] { ' ' }, 3, StringSplitOptions.RemoveEmptyEntries);
-            string command = parts[0]. ToLowerInvariant();
+            string command = parts[0].ToLowerInvariant();
 
             try
             {
@@ -159,7 +161,7 @@ namespace Microkernel.Services
 
                     case "unmute":
                         ConsoleKernelLogger.SetMuted(false);
-                        Console. WriteLine("Console output unmuted.");
+                        Console.WriteLine("Console output unmuted.");
                         return false;
 
                     case "crash":
@@ -174,7 +176,7 @@ namespace Microkernel.Services
                         return false;
 
                     case "restart":
-                        if (parts.Length < 2)
+                        if (parts. Length < 2)
                         {
                             Console.WriteLine("Usage: restart <pluginName>");
                         }
@@ -182,6 +184,23 @@ namespace Microkernel.Services
                         {
                             RestartPlugin(parts[1]);
                         }
+                        return false;
+
+                    // NEW: UserLoggedInEvent command (as per assignment requirements)
+                    case "userlogin":
+                    case "login":
+                        SendUserLoggedInEvent(parts. Length > 1 ? string.Join(" ", parts.Skip(1)) : null);
+                        return false;
+
+                    // NEW: DataProcessedEvent command (as per assignment requirements)
+                    case "dataprocessed":
+                    case "processed":
+                        SendDataProcessedEvent(parts.Length > 1 ? string. Join(" ", parts. Skip(1)) : null);
+                        return false;
+
+                    // NEW: Demo command to send sample events
+                    case "demo":
+                        RunDemo();
                         return false;
 
                     case "exit":
@@ -203,6 +222,190 @@ namespace Microkernel.Services
             }
         }
 
+        /// <summary>
+        /// Sends a UserLoggedInEvent (as required by assignment). 
+        /// </summary>
+        private void SendUserLoggedInEvent(string payload)
+        {
+            UserLoggedInEvent userEvent;
+
+            if (! string.IsNullOrWhiteSpace(payload))
+            {
+                try
+                {
+                    userEvent = JsonSerializer.Deserialize<UserLoggedInEvent>(payload, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
+                catch
+                {
+                    // If JSON parsing fails, treat payload as username
+                    userEvent = new UserLoggedInEvent
+                    {
+                        UserId = Guid.NewGuid().ToString(),
+                        Username = payload,
+                        IpAddress = "127.0.0. 1"
+                    };
+                }
+            }
+            else
+            {
+                // Create sample event with random data
+                var random = new Random();
+                string[] sampleUsers = { "alice", "bob", "charlie", "diana", "eve" };
+                string[] sampleIps = { "192.168.1. 100", "10.0.0. 50", "172.16.0.25", "192.168.0.1" };
+
+                userEvent = new UserLoggedInEvent
+                {
+                    UserId = Guid.NewGuid().ToString(),
+                    Username = sampleUsers[random.Next(sampleUsers. Length)],
+                    IpAddress = sampleIps[random.Next(sampleIps.Length)]
+                };
+            }
+
+            var evt = new EventMessage
+            {
+                Topic = "user.loggedin",
+                Payload = JsonSerializer.Serialize(userEvent, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy. CamelCase
+                }),
+                Timestamp = DateTime. UtcNow,
+                Source = "CommandHandler"
+            };
+
+            _kernel. Publish(evt);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"Published UserLoggedInEvent:");
+            Console.ResetColor();
+            Console.WriteLine($"  User: {userEvent. Username} (ID: {userEvent.UserId})");
+            Console. WriteLine($"  IP: {userEvent. IpAddress}");
+            Console.WriteLine($"  Session: {userEvent. SessionId}");
+            Console.WriteLine($"  Time: {userEvent. LoginTime:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        /// <summary>
+        /// Sends a DataProcessedEvent (as required by assignment).
+        /// </summary>
+        private void SendDataProcessedEvent(string payload)
+        {
+            DataProcessedEvent dataEvent;
+
+            if (!string. IsNullOrWhiteSpace(payload))
+            {
+                try
+                {
+                    dataEvent = JsonSerializer.Deserialize<DataProcessedEvent>(payload, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
+                catch
+                {
+                    // If JSON parsing fails, try to parse as record count
+                    int records = 0;
+                    int.TryParse(payload, out records);
+                    
+                    var random = new Random();
+                    dataEvent = new DataProcessedEvent
+                    {
+                        DataSource = "CommandLine",
+                        RecordsProcessed = records > 0 ? records : random.Next(50, 500),
+                        ProcessingTimeMs = random.NextDouble() * 1000
+                    };
+                }
+            }
+            else
+            {
+                // Create sample event with random data
+                var random = new Random();
+                string[] dataSources = { "CustomerDB", "OrdersDB", "InventoryDB", "AnalyticsDB", "LogsDB" };
+
+                dataEvent = new DataProcessedEvent
+                {
+                    DataSource = dataSources[random.Next(dataSources. Length)],
+                    RecordsProcessed = random.Next(50, 5000),
+                    ProcessingTimeMs = random.NextDouble() * 2000,
+                    Success = random.Next(10) != 0 // 90% success rate
+                };
+
+                if (! dataEvent.Success)
+                {
+                    dataEvent.ErrorMessage = "Simulated processing error";
+                }
+            }
+
+            var evt = new EventMessage
+            {
+                Topic = "data.processed",
+                Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                }),
+                Timestamp = DateTime. UtcNow,
+                Source = "CommandHandler"
+            };
+
+            _kernel.Publish(evt);
+
+            Console.ForegroundColor = dataEvent.Success ? ConsoleColor.Green : ConsoleColor.Yellow;
+            Console. WriteLine($"Published DataProcessedEvent:");
+            Console.ResetColor();
+            Console.WriteLine($"  Process ID: {dataEvent. ProcessId}");
+            Console.WriteLine($"  Source: {dataEvent. DataSource}");
+            Console.WriteLine($"  Records: {dataEvent.RecordsProcessed}");
+            Console. WriteLine($"  Time: {dataEvent. ProcessingTimeMs:F2}ms");
+            Console.WriteLine($"  Success: {dataEvent.Success}");
+            if (!dataEvent.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"  Error: {dataEvent.ErrorMessage}");
+                Console.ResetColor();
+            }
+        }
+
+        /// <summary>
+        /// Runs a demo that sends sample UserLoggedInEvent and DataProcessedEvent. 
+        /// </summary>
+        private void RunDemo()
+        {
+            Console. ForegroundColor = ConsoleColor. Cyan;
+            Console. WriteLine("╔════════════════════════════════════════════════════════╗");
+            Console.WriteLine("║           IKT300 Microkernel Event Demo                ║");
+            Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            Console.WriteLine("Sending UserLoggedInEvent...");
+            SendUserLoggedInEvent(null);
+            Console.WriteLine();
+
+            System.Threading.Thread. Sleep(500);
+
+            Console. WriteLine("Sending DataProcessedEvent...");
+            SendDataProcessedEvent(null);
+            Console.WriteLine();
+
+            System. Threading.Thread.Sleep(500);
+
+            Console.WriteLine("Sending another UserLoggedInEvent...");
+            SendUserLoggedInEvent(null);
+            Console.WriteLine();
+
+            System.Threading. Thread.Sleep(500);
+
+            Console. WriteLine("Sending another DataProcessedEvent.. .");
+            SendDataProcessedEvent(null);
+            Console. WriteLine();
+
+            Console.ForegroundColor = ConsoleColor. Cyan;
+            Console.WriteLine("Demo complete!  Check the MetricsLogger output above.");
+            Console.WriteLine("You can also run: 'userlogin <username>' or 'dataprocessed <count>'");
+            Console.ResetColor();
+        }
+
         private void StartPlugin(string pluginName)
         {
             var pluginInfo = FindPlugin(pluginName);
@@ -211,9 +414,9 @@ namespace Microkernel.Services
             // Check if plugin is faulted
             if (pluginInfo. State == "Faulted")
             {
-                Console.ForegroundColor = ConsoleColor. Yellow;
+                Console. ForegroundColor = ConsoleColor.Yellow;
                 Console. WriteLine("Plugin '" + pluginInfo.Name + "' is in FAULTED state.");
-                Console.WriteLine("Use 'restart " + pluginInfo.Name + "' to recover it first.");
+                Console.WriteLine("Use 'restart " + pluginInfo. Name + "' to recover it first.");
                 Console. ResetColor();
                 return;
             }
@@ -225,7 +428,7 @@ namespace Microkernel.Services
             {
                 Topic = topic,
                 Payload = "",
-                Timestamp = DateTime. UtcNow,
+                Timestamp = DateTime.UtcNow,
                 Source = "Console"
             };
 
@@ -241,32 +444,32 @@ namespace Microkernel.Services
             // Check if plugin is faulted
             if (pluginInfo.State == "Faulted")
             {
-                Console.ForegroundColor = ConsoleColor. Yellow;
+                Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine("Plugin '" + pluginInfo.Name + "' is in FAULTED state.");
-                Console.WriteLine("Use 'restart " + pluginInfo.Name + "' to recover it first.");
-                Console.ResetColor();
+                Console. WriteLine("Use 'restart " + pluginInfo.Name + "' to recover it first.");
+                Console. ResetColor();
                 return;
             }
 
             // Send stop event to the plugin
-            string topic = GetPluginTopic(pluginInfo.Name, "stop");
+            string topic = GetPluginTopic(pluginInfo. Name, "stop");
 
             var evt = new EventMessage
             {
                 Topic = topic,
                 Payload = "",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime. UtcNow,
                 Source = "Console"
             };
 
             _kernel.Publish(evt);
-            Console.WriteLine("Stopped: " + pluginInfo.Name);
+            Console. WriteLine("Stopped: " + pluginInfo.Name);
         }
 
         private PluginInfo FindPlugin(string pluginName)
         {
             var plugins = _kernel.GetLoadedPlugins();
-            
+
             var plugin = plugins.FirstOrDefault(p =>
                 p.Name. Equals(pluginName, StringComparison.OrdinalIgnoreCase));
 
@@ -274,7 +477,7 @@ namespace Microkernel.Services
             {
                 // Try partial match
                 plugin = plugins.FirstOrDefault(p =>
-                    p.Name. StartsWith(pluginName, StringComparison.OrdinalIgnoreCase));
+                    p.Name.StartsWith(pluginName, StringComparison.OrdinalIgnoreCase));
             }
 
             // Handle shorthand names
@@ -304,7 +507,7 @@ namespace Microkernel.Services
         private string GetPluginTopic(string pluginName, string action)
         {
             // Handle known plugin topic patterns
-            if (pluginName. Equals("EventGenerator", StringComparison.OrdinalIgnoreCase))
+            if (pluginName.Equals("EventGenerator", StringComparison.OrdinalIgnoreCase))
             {
                 return "generator." + action;
             }
@@ -329,21 +532,30 @@ namespace Microkernel.Services
         {
             var plugins = _kernel. GetLoadedPlugins();
 
-            Console.WriteLine();
+            Console. WriteLine();
             Console.WriteLine("  Kernel State:    " + (_kernel as Kernel)?.State);
-            Console.WriteLine("  Active Plugins:  " + plugins.Count(p => p.State == "Running"));
+            Console.WriteLine("  Active Plugins:  " + plugins. Count(p => p.State == "Running"));
             Console. WriteLine("  Faulted Plugins: " + plugins.Count(p => p. State == "Faulted"));
             Console.WriteLine("  Total Plugins:   " + plugins.Count);
+            Console.WriteLine();
+
+            // Show available event commands
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console. WriteLine("  Event Commands:");
+            Console.WriteLine("    userlogin [json|username]  - Send UserLoggedInEvent");
+            Console. WriteLine("    dataprocessed [json|count] - Send DataProcessedEvent");
+            Console.WriteLine("    demo                       - Run demo with sample events");
+            Console.ResetColor();
             Console.WriteLine();
         }
 
         private void ListPlugins()
         {
-            var plugins = _kernel.GetLoadedPlugins();
+            var plugins = _kernel. GetLoadedPlugins();
 
-            if (plugins. Count == 0)
+            if (plugins.Count == 0)
             {
-                Console.WriteLine("No plugins loaded.");
+                Console. WriteLine("No plugins loaded.");
                 return;
             }
 
@@ -369,7 +581,7 @@ namespace Microkernel.Services
                     Console.ForegroundColor = ConsoleColor. Yellow;
                 }
 
-                Console.WriteLine(string. Format("{0,-20} {1,-10} {2,-12} {3:HH:mm:ss}",
+                Console.WriteLine(string.Format("{0,-20} {1,-10} {2,-12} {3:HH:mm:ss}",
                     plugin. Name, plugin.Version, plugin.State, plugin.LoadedAt));
 
                 Console.ResetColor();
@@ -377,14 +589,15 @@ namespace Microkernel.Services
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console. WriteLine("Tip: Type 'help <pluginname>' for plugin-specific help.");
-            Console. WriteLine("Tip: Use 'start <pluginname>' or 'stop <pluginname>' to control plugins.");
+            Console.WriteLine("Tip: Type 'help <pluginname>' for plugin-specific help.");
+            Console.WriteLine("Tip: Use 'start <pluginname>' or 'stop <pluginname>' to control plugins.");
+            Console.WriteLine("Tip: Use 'demo' to send sample UserLoggedInEvent and DataProcessedEvent.");
             if (plugins.Any(p => p. State == "Faulted"))
             {
                 Console. ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Tip: Use 'restart <pluginname>' to restart faulted plugins.");
+                Console. WriteLine("Tip: Use 'restart <pluginname>' to restart faulted plugins.");
             }
-            Console.ResetColor();
+            Console. ResetColor();
         }
 
         private void SendEvent(string topic, string payload)
@@ -423,11 +636,11 @@ namespace Microkernel.Services
                 });
 
                 _subscriptions[pattern] = sub;
-                Console. WriteLine("Subscribed to: " + pattern);
+                Console.WriteLine("Subscribed to: " + pattern);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Failed to subscribe: " + ex.Message);
+                Console. WriteLine("Failed to subscribe: " + ex.Message);
             }
         }
 
@@ -513,11 +726,11 @@ namespace Microkernel.Services
             bool result = _kernel.UnloadPlugin(pluginInfo. Name);
             if (result)
             {
-                Console. WriteLine("Plugin unloaded: " + pluginInfo. Name);
+                Console. WriteLine("Plugin unloaded: " + pluginInfo.Name);
             }
             else
             {
-                Console. WriteLine("Failed to unload plugin: " + pluginInfo.Name);
+                Console.WriteLine("Failed to unload plugin: " + pluginInfo.Name);
             }
         }
 
@@ -529,12 +742,12 @@ namespace Microkernel.Services
             if (pluginInfo. State == "Faulted")
             {
                 Console. ForegroundColor = ConsoleColor.Yellow;
-                Console. WriteLine("Plugin '" + pluginInfo. Name + "' is already in FAULTED state.");
+                Console. WriteLine("Plugin '" + pluginInfo.Name + "' is already in FAULTED state.");
                 Console.ResetColor();
                 return;
             }
 
-            Console.ForegroundColor = ConsoleColor.Red;
+            Console.ForegroundColor = ConsoleColor. Red;
             Console.WriteLine("Crashing plugin: " + pluginInfo.Name);
             Console. ResetColor();
 
@@ -542,7 +755,7 @@ namespace Microkernel.Services
             if (result)
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console. WriteLine("Plugin " + pluginInfo. Name + " is now in FAULTED state.");
+                Console.WriteLine("Plugin " + pluginInfo. Name + " is now in FAULTED state.");
                 Console. WriteLine("It will no longer receive events.");
                 Console.WriteLine("Use 'restart " + pluginInfo.Name + "' to recover.");
                 Console.ResetColor();
@@ -564,7 +777,7 @@ namespace Microkernel.Services
             if (result)
             {
                 Console. ForegroundColor = ConsoleColor.Green;
-                Console. WriteLine("Plugin " + pluginInfo. Name + " restarted successfully.");
+                Console.WriteLine("Plugin " + pluginInfo.Name + " restarted successfully.");
                 Console.ResetColor();
             }
             else
