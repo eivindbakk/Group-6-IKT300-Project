@@ -13,17 +13,12 @@ namespace Microkernel.Services
     public class ConsoleKernelLogger : IKernelLogger
     {
         private static bool _muted = false;
-        private static LogLevel _minLevel = LogLevel. Info;  // Default: hide debug messages
+        private static LogLevel _minLevel = LogLevel. Info;
         private static readonly object _lock = new object();
 
         public static void SetMuted(bool muted)
         {
             _muted = muted;
-        }
-
-        public static void SetMinLogLevel(LogLevel level)
-        {
-            _minLevel = level;
         }
 
         public static void EnableDebug()
@@ -33,7 +28,7 @@ namespace Microkernel.Services
 
         public static void DisableDebug()
         {
-            _minLevel = LogLevel.Info;
+            _minLevel = LogLevel. Info;
         }
 
         public void Debug(string message)
@@ -74,7 +69,7 @@ namespace Microkernel.Services
 
             lock (_lock)
             {
-                string timestamp = DateTime.Now. ToString("HH:mm:ss.fff");
+                string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
                 Console.ForegroundColor = ConsoleColor.DarkGray;
                 Console.Write("[" + timestamp + "] ");
                 Console. ForegroundColor = color;

@@ -70,11 +70,6 @@ namespace Microkernel.Messaging
             return subscription;
         }
 
-        public IDisposable SubscribeAll(Action<EventMessage> handler)
-        {
-            return Subscribe("*", handler);
-        }
-
         private void Unsubscribe(Subscription subscription)
         {
             lock (_lock)

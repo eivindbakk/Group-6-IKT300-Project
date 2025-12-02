@@ -1,5 +1,7 @@
 using System;
-using System.Collections.  Generic;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using Microkernel.Core;
 using Microkernel.Services;
 
@@ -14,10 +16,18 @@ namespace Microkernel
         private static string _currentInput = "";
         private static int _cursorPosition = 0;
 
+        private static readonly string[] Commands =
+        {
+            "help", "status", "plugins", "demo",
+            "userlogin", "dataprocessed", "metrics", "send", "generate",
+            "load", "unload", "crash", "restart",
+            "debug", "mute", "unmute", "exit"
+        };
+
         static void Main(string[] args)
         {
             Console.Title = "Microkernel - IKT300";
-            
+
             PrintBanner();
 
             try
@@ -26,7 +36,10 @@ namespace Microkernel
                 _kernel = Kernel.CreateDefault(configuration);
                 _commandHandler = new CommandHandler(_kernel);
 
-                _kernel. Start();
+                _kernel.Start();
+
+                // Wait a moment for plugins to connect
+                Thread.Sleep(500);
 
                 Console.WriteLine();
                 PrintHelp();
@@ -37,20 +50,20 @@ namespace Microkernel
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Fatal error: " + ex. Message);
+                Console.WriteLine("Fatal error: " + ex.Message);
                 Console.ResetColor();
             }
             finally
             {
                 Console.WriteLine("Shutting down...");
-                _kernel?. Dispose();
+                _kernel?.Dispose();
             }
         }
 
         private static void PrintBanner()
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console. WriteLine(@"
+            Console.WriteLine(@"
   __  __ _                _  __                    _ 
  |  \/  (_) ___ _ __ ___ | |/ /___ _ __ _ __   ___| |
  | |\/| | |/ __| '__/ _ \| ' // _ \ '__| '_ \ / _ \ |
@@ -65,25 +78,21 @@ namespace Microkernel
         private static void PrintHelp()
         {
             Console.WriteLine("Available Commands:");
-            Console. WriteLine("-------------------");
+            Console.WriteLine("-------------------");
             Console.WriteLine("  help                  Show this help message");
-            Console.WriteLine("  help <pluginname>     Show help for a specific plugin");
             Console.WriteLine("  status                Show kernel status");
             Console.WriteLine("  plugins               List all loaded plugins");
-            Console.WriteLine("  start <pluginname>    Start a plugin");
-            Console.WriteLine("  stop <pluginname>     Stop a plugin");
-            Console.WriteLine("  send <topic> [data]   Publish an event");
-            Console.WriteLine("  demo                  Run demo with UserLoggedInEvent and DataProcessedEvent");
+            Console.WriteLine("  demo                  Run demo with required events");
             Console.WriteLine("  userlogin [name]      Send a UserLoggedInEvent");
             Console.WriteLine("  dataprocessed [n]     Send a DataProcessedEvent");
+            Console.WriteLine("  send <topic> [data]   Publish a custom event");
+            Console.WriteLine("  load <path>           Load a plugin executable");
+            Console.WriteLine("  unload <plugin>       Unload a plugin");
+            Console.WriteLine("  crash <plugin>        Kill a plugin (fault isolation test)");
+            Console.WriteLine("  restart <plugin>      Restart a plugin");
             Console.WriteLine("  debug on|off          Toggle debug output");
-            Console. WriteLine("  mute / unmute         Mute/unmute console output");
+            Console.WriteLine("  mute / unmute         Mute/unmute console output");
             Console.WriteLine("  exit                  Stop kernel and exit");
-            Console.WriteLine();
-            Console.WriteLine("Keyboard:");
-            Console.WriteLine("-------------------");
-            Console. WriteLine("  Tab                   Autocomplete command or plugin name");
-            Console. WriteLine("  Up/Down               Navigate command history");
         }
 
         private static void RunInputLoop()
@@ -93,15 +102,15 @@ namespace Microkernel
                 Console.Write("> ");
                 string input = ReadLineWithHistory();
 
-                if (string. IsNullOrWhiteSpace(input))
+                if (string.IsNullOrWhiteSpace(input))
                     continue;
 
-                // Add to history
                 if (_commandHistory.Count == 0 || _commandHistory[_commandHistory.Count - 1] != input)
                 {
-                    _commandHistory. Add(input);
+                    _commandHistory.Add(input);
                 }
-                _historyIndex = _commandHistory. Count;
+
+                _historyIndex = _commandHistory.Count;
 
                 try
                 {
@@ -135,13 +144,14 @@ namespace Microkernel
                         Console.WriteLine();
                         return _currentInput;
 
-                    case ConsoleKey. Backspace:
+                    case ConsoleKey.Backspace:
                         if (_cursorPosition > 0)
                         {
-                            _currentInput = _currentInput. Remove(_cursorPosition - 1, 1);
+                            _currentInput = _currentInput.Remove(_cursorPosition - 1, 1);
                             _cursorPosition--;
                             RedrawInput();
                         }
+
                         break;
 
                     case ConsoleKey.Delete:
@@ -150,14 +160,16 @@ namespace Microkernel
                             _currentInput = _currentInput.Remove(_cursorPosition, 1);
                             RedrawInput();
                         }
+
                         break;
 
-                    case ConsoleKey. LeftArrow:
+                    case ConsoleKey.LeftArrow:
                         if (_cursorPosition > 0)
                         {
                             _cursorPosition--;
                             Console.CursorLeft--;
                         }
+
                         break;
 
                     case ConsoleKey.RightArrow:
@@ -166,6 +178,7 @@ namespace Microkernel
                             _cursorPosition++;
                             Console.CursorLeft++;
                         }
+
                         break;
 
                     case ConsoleKey.UpArrow:
@@ -173,12 +186,13 @@ namespace Microkernel
                         {
                             _historyIndex--;
                             _currentInput = _commandHistory[_historyIndex];
-                            _cursorPosition = _currentInput. Length;
+                            _cursorPosition = _currentInput.Length;
                             RedrawInput();
                         }
+
                         break;
 
-                    case ConsoleKey. DownArrow:
+                    case ConsoleKey.DownArrow:
                         if (_historyIndex < _commandHistory.Count - 1)
                         {
                             _historyIndex++;
@@ -193,6 +207,7 @@ namespace Microkernel
                             _cursorPosition = 0;
                             RedrawInput();
                         }
+
                         break;
 
                     case ConsoleKey.Tab:
@@ -204,7 +219,7 @@ namespace Microkernel
                         _cursorPosition = 0;
                         break;
 
-                    case ConsoleKey. End:
+                    case ConsoleKey.End:
                         Console.CursorLeft += (_currentInput.Length - _cursorPosition);
                         _cursorPosition = _currentInput.Length;
                         break;
@@ -216,12 +231,13 @@ namespace Microkernel
                         break;
 
                     default:
-                        if (! char.IsControl(key.KeyChar))
+                        if (!char.IsControl(key.KeyChar))
                         {
-                            _currentInput = _currentInput. Insert(_cursorPosition, key.KeyChar. ToString());
+                            _currentInput = _currentInput.Insert(_cursorPosition, key.KeyChar.ToString());
                             _cursorPosition++;
                             RedrawInput();
                         }
+
                         break;
                 }
             }
@@ -231,43 +247,49 @@ namespace Microkernel
         {
             int promptLength = 2; // "> "
             Console.CursorLeft = promptLength;
-            Console.Write(_currentInput + new string(' ', 20)); // Clear extra chars
+            Console.Write(_currentInput + new string(' ', 20));
             Console.CursorLeft = promptLength + _cursorPosition;
         }
 
         private static void HandleTabCompletion()
         {
-            string[] commands = { 
-                "help", "status", "plugins", "start", "stop", "send", 
-                "subscribe", "unsubscribe", "subscriptions", "filter", "unfilter",
-                "mute", "unmute", "unload", "crash", "restart", 
-                "demo", "userlogin", "dataprocessed", "debug", "exit" 
-            };
-
-            string input = _currentInput. ToLowerInvariant();
-            
-            // Find matching commands
+            string input = _currentInput.ToLowerInvariant().TrimStart();
             var matches = new List<string>();
-            foreach (var cmd in commands)
+
+            // Check if we're completing a command argument
+            string[] parts = input.Split(' ', 2);
+            string command = parts[0];
+            string partialArg = parts.Length > 1 ? parts[1] : null;
+
+            if (partialArg != null)
             {
-                if (cmd.StartsWith(input))
+                // Complete plugin name for these commands
+                if (command == "crash" || command == "restart" || command == "unload")
                 {
-                    matches.Add(cmd);
+                    var plugins = _kernel.GetLoadedPlugins();
+                    foreach (var plugin in plugins)
+                    {
+                        string name = plugin.Name.ToLowerInvariant();
+                        if (name.Contains(partialArg) || partialArg == "")
+                        {
+                            matches.Add(command + " " + plugin.Name);
+                        }
+                    }
+                }
+                else if (command == "debug")
+                {
+                    if ("on".StartsWith(partialArg)) matches.Add("debug on");
+                    if ("off".StartsWith(partialArg)) matches.Add("debug off");
                 }
             }
-
-            // Also try plugin names if input starts with start/stop/help
-            if (input.StartsWith("start ") || input.StartsWith("stop ") || input.StartsWith("help "))
+            else
             {
-                string prefix = input. Substring(0, input.IndexOf(' ') + 1);
-                string partial = input.Substring(input.IndexOf(' ') + 1);
-                
-                var plugins = _kernel.GetLoadedPlugins();
-                foreach (var plugin in plugins)
+                // Complete command
+                foreach (var cmd in Commands)
                 {
-                    if (plugin.Name. ToLowerInvariant().StartsWith(partial))
+                    if (cmd.StartsWith(command))
                     {
-                        matches.Add(prefix + plugin.Name);
+                        matches.Add(cmd);
                     }
                 }
             }
@@ -281,11 +303,9 @@ namespace Microkernel
             else if (matches.Count > 1)
             {
                 Console.WriteLine();
-                foreach (var match in matches)
-                {
-                    Console.Write(match + "  ");
-                }
-                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine(string.Join("  ", matches));
+                Console.ResetColor();
                 Console.Write("> " + _currentInput);
             }
         }

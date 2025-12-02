@@ -1,25 +1,31 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Collections. Generic;
 using Contracts;
 
 namespace Microkernel.Core
 {
-    public interface IKernel : IDisposable
+    /// <summary>
+    /// Core kernel interface - minimal responsibilities:
+    /// - Process management
+    /// - IPC routing
+    /// - Message bus
+    /// </summary>
+    public interface IKernel
     {
         KernelState State { get; }
+
         void Start();
         void Stop();
+
         void Publish(EventMessage message);
-        IReadOnlyList<PluginInfo> GetLoadedPlugins();
-        IPlugin GetPlugin(string name);
         IDisposable Subscribe(string topicPattern, Action<EventMessage> handler);
+
+        IReadOnlyList<PluginInfo> GetLoadedPlugins();
+        (int total, int running, int faulted) GetPluginCounts();
+
+        bool LoadPlugin(string pluginName, string executablePath);
         bool UnloadPlugin(string pluginName);
-        IReadOnlyList<string> GetAutoSubscriptions();
-        
-        // Forcefully crash a plugin - actually stops it and corrupts its state
         bool CrashPlugin(string pluginName);
-        
-        // Restart a faulted plugin
         bool RestartPlugin(string pluginName);
     }
 }

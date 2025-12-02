@@ -20,10 +20,5 @@ namespace Microkernel. Messaging
         /// <param name="handler">Handler to invoke when message matches</param>
         /// <returns>Subscription that can be disposed to unsubscribe</returns>
         IDisposable Subscribe(string topicPattern, Action<EventMessage> handler);
-
-        /// <summary>
-        /// Subscribe to all messages.
-        /// </summary>
-        IDisposable SubscribeAll(Action<EventMessage> handler);
     }
 }

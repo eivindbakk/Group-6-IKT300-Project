@@ -1,7 +1,8 @@
 ﻿using System;
-using System. IO;
-using System. IO. Pipes;
-using System.Text. Json;
+using System.IO;
+using System. IO.Pipes;
+using System.Runtime.  InteropServices;
+using System.Text.  Json;
 using System.Threading;
 using Contracts;
 using Contracts.Events;
@@ -9,11 +10,6 @@ using Contracts.IPC;
 
 namespace EventGeneratorPlugin
 {
-    /// <summary>
-    /// EventGenerator plugin running as a SEPARATE OS PROCESS. 
-    /// Communicates with the Microkernel via Named Pipes (IPC).
-    /// Generates UserLoggedInEvent and DataProcessedEvent periodically.
-    /// </summary>
     class Program
     {
         private static string _pipeName;
@@ -24,22 +20,18 @@ namespace EventGeneratorPlugin
         private static int _eventsGenerated = 0;
         private static Random _random = new Random();
         private static Thread _generatorThread;
+        private static readonly object _lock = new object();
 
         static void Main(string[] args)
         {
-            Console.WriteLine("[EventGenerator Process] Starting...");
-            Console.WriteLine("[EventGenerator Process] PID: " + Environment.ProcessId);
+            Console.WriteLine("[EventGenerator] Starting.. .");
 
             _pipeName = GetPipeNameFromArgs(args);
             if (string.IsNullOrEmpty(_pipeName))
             {
-                Console.WriteLine("[EventGenerator Process] ERROR: No pipe name specified.  Use --pipe <name>");
-                Console.WriteLine("[EventGenerator Process] Running in standalone mode for testing...");
-                RunStandaloneMode();
+                Console.WriteLine("[EventGenerator] ERROR: No pipe name specified.");
                 return;
             }
-
-            Console.WriteLine("[EventGenerator Process] Connecting to pipe: " + _pipeName);
 
             try
             {
@@ -47,21 +39,18 @@ namespace EventGeneratorPlugin
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[EventGenerator Process] Fatal error: " + ex.Message);
+                Console.WriteLine("[EventGenerator] Fatal error: " + ex.Message);
             }
 
-            Console.WriteLine("[EventGenerator Process] Shutting down...");
-            Console.WriteLine("[EventGenerator Process] Total events generated: " + _eventsGenerated);
+            Console.WriteLine("[EventGenerator] Shutting down.  Events generated: " + _eventsGenerated);
         }
 
         private static string GetPipeNameFromArgs(string[] args)
         {
             for (int i = 0; i < args.Length - 1; i++)
             {
-                if (args[i] == "--pipe" || args[i] == "-p")
-                {
+                if (args[i] == "--pipe")
                     return args[i + 1];
-                }
             }
             return null;
         }
@@ -70,11 +59,10 @@ namespace EventGeneratorPlugin
         {
             using (_pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions. Asynchronous))
             {
-                Console.WriteLine("[EventGenerator Process] Connecting to kernel...");
+                Console.WriteLine("[EventGenerator] Connecting.. .");
                 _pipeClient.Connect(30000);
-                Console.WriteLine("[EventGenerator Process] Connected to kernel!");
+                Console.WriteLine("[EventGenerator] Connected!");
 
-                // Send ready message
                 SendMessage(new IpcMessage
                 {
                     Type = IpcMessageType. Ack,
@@ -82,13 +70,11 @@ namespace EventGeneratorPlugin
                     Response = "Ready"
                 });
 
-                // Start heartbeat thread
                 var heartbeatThread = new Thread(SendHeartbeats);
                 heartbeatThread.IsBackground = true;
                 heartbeatThread.Start();
 
-                // Listen for messages from kernel
-                while (_running && _pipeClient. IsConnected)
+                while (_running && _pipeClient.IsConnected)
                 {
                     try
                     {
@@ -103,12 +89,11 @@ namespace EventGeneratorPlugin
                     }
                     catch (IOException)
                     {
-                        Console.WriteLine("[EventGenerator Process] Pipe disconnected.");
                         break;
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine("[EventGenerator Process] Error: " + ex.Message);
+                        Console.WriteLine("[EventGenerator] Error: " + ex.Message);
                     }
                 }
             }
@@ -125,15 +110,12 @@ namespace EventGeneratorPlugin
                     {
                         SendMessage(new IpcMessage
                         {
-                            Type = IpcMessageType. Heartbeat,
+                            Type = IpcMessageType.Heartbeat,
                             PluginName = "EventGenerator"
                         });
                     }
                 }
-                catch
-                {
-                    break;
-                }
+                catch { break; }
             }
         }
 
@@ -141,28 +123,19 @@ namespace EventGeneratorPlugin
         {
             switch (message.Type)
             {
-                case IpcMessageType. Event:
-                    HandleEvent(message.Event);
-                    break;
-
                 case IpcMessageType.Start:
-                    Console.WriteLine("[EventGenerator Process] Received START command.");
-                    StartGenerating();
-                    break;
-
-                case IpcMessageType. Stop:
-                    Console.WriteLine("[EventGenerator Process] Received STOP command.");
-                    StopGenerating();
+                    Console.WriteLine("[EventGenerator] Received START from kernel.");
                     break;
 
                 case IpcMessageType. Shutdown:
-                    Console.WriteLine("[EventGenerator Process] Received SHUTDOWN command.");
+                    Console.WriteLine("[EventGenerator] Received SHUTDOWN.");
                     StopGenerating();
                     _running = false;
                     break;
 
-                default:
-                    Console.WriteLine("[EventGenerator Process] Unknown message type: " + message.Type);
+                case IpcMessageType. Event:
+                    if (message.Event != null)
+                        HandleEvent(message.Event);
                     break;
             }
         }
@@ -171,59 +144,71 @@ namespace EventGeneratorPlugin
         {
             if (evt == null) return;
 
-            string topic = evt.Topic ??  "";
-            string payload = evt. Payload ?? "";
+            string topic = (evt.Topic ??  "").ToLowerInvariant(). Trim();
+            string payload = (evt.Payload ??  ""). Trim();
 
-            // Handle control commands sent as events
-            if (topic. Equals("generator. start", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine("[EventGenerator] Received: " + topic);
+
+            switch (topic)
             {
-                StartGenerating();
-            }
-            else if (topic.Equals("generator.stop", StringComparison.OrdinalIgnoreCase))
-            {
-                StopGenerating();
-            }
-            else if (topic.Equals("generator.interval", StringComparison.OrdinalIgnoreCase))
-            {
-                if (int.TryParse(payload, out int interval) && interval >= 100)
-                {
-                    _intervalMs = interval;
-                    Console. WriteLine("[EventGenerator Process] Interval set to: " + _intervalMs + "ms");
-                }
-            }
-            else if (topic. Equals("generator.status", StringComparison.OrdinalIgnoreCase))
-            {
-                string status = _generating ? "Running" : "Stopped";
-                Console.WriteLine("[EventGenerator Process] Status: " + status + ", Events: " + _eventsGenerated + ", Interval: " + _intervalMs + "ms");
+                case "eventgenerator.start":
+                case "generator.start":
+                    StartGenerating();
+                    break;
+
+                case "eventgenerator.stop":
+                case "generator.stop":
+                    StopGenerating();
+                    break;
+
+                case "eventgenerator.now":
+                case "generator.now":
+                    GenerateSystemMetricsEvent();
+                    break;
+
+                case "eventgenerator.interval":
+                case "generator.interval":
+                    if (int.TryParse(payload, out int intervalSec) && intervalSec > 0)
+                    {
+                        _intervalMs = intervalSec * 1000;
+                        Console.WriteLine("[EventGenerator] Interval: " + intervalSec + "s");
+                    }
+                    else if (int.TryParse(payload, out int intervalMs) && intervalMs >= 100)
+                    {
+                        _intervalMs = intervalMs;
+                        Console. WriteLine("[EventGenerator] Interval: " + intervalMs + "ms");
+                    }
+                    break;
             }
         }
 
         private static void StartGenerating()
         {
-            if (_generating)
+            lock (_lock)
             {
-                Console. WriteLine("[EventGenerator Process] Already generating events.");
-                return;
+                if (_generating)
+                {
+                    Console. WriteLine("[EventGenerator] Already generating.");
+                    return;
+                }
+
+                _generating = true;
+                _generatorThread = new Thread(GeneratorLoop);
+                _generatorThread.IsBackground = true;
+                _generatorThread.Start();
+
+                Console.WriteLine("[EventGenerator] Started.  Interval: " + _intervalMs + "ms");
             }
-
-            _generating = true;
-            _generatorThread = new Thread(GeneratorLoop);
-            _generatorThread.IsBackground = true;
-            _generatorThread.Start();
-
-            Console.WriteLine("[EventGenerator Process] Started generating events (interval: " + _intervalMs + "ms)");
         }
 
         private static void StopGenerating()
         {
-            if (!_generating)
+            lock (_lock)
             {
-                Console.WriteLine("[EventGenerator Process] Already stopped.");
-                return;
+                if (!_generating) return;
+                _generating = false;
+                Console.WriteLine("[EventGenerator] Stopped.");
             }
-
-            _generating = false;
-            Console. WriteLine("[EventGenerator Process] Stopped generating events.  Total: " + _eventsGenerated);
         }
 
         private static void GeneratorLoop()
@@ -232,102 +217,264 @@ namespace EventGeneratorPlugin
             {
                 try
                 {
-                    // Alternate between UserLoggedInEvent and DataProcessedEvent
-                    if (_eventsGenerated % 2 == 0)
+                    // Generate system metrics every cycle
+                    GenerateSystemMetricsEvent();
+                    _eventsGenerated++;
+
+                    // Also generate other events periodically
+                    if (_eventsGenerated % 3 == 0)
                     {
                         GenerateUserLoggedInEvent();
-                    }
-                    else
-                    {
-                        GenerateDataProcessedEvent();
+                        _eventsGenerated++;
                     }
 
-                    _eventsGenerated++;
-                    Thread.Sleep(_intervalMs);
+                    if (_eventsGenerated % 5 == 0)
+                    {
+                        GenerateDataProcessedEvent();
+                        _eventsGenerated++;
+                    }
+
+                    Thread. Sleep(_intervalMs);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("[EventGenerator Process] Generator error: " + ex.Message);
+                    Console.WriteLine("[EventGenerator] Error: " + ex.Message);
                     Thread.Sleep(1000);
                 }
             }
         }
 
+        #region Event Generators
+
         private static void GenerateUserLoggedInEvent()
         {
-            string[] usernames = { "alice", "bob", "charlie", "diana", "eve", "frank", "grace", "henry" };
-            string[] ips = { "192.168.1. 100", "192.168.1.101", "10.0.0. 50", "10.0.0.51", "172.16.0. 25" };
+            string[] usernames = { "alice", "bob", "charlie", "diana", "eve", "frank", "grace" };
+            string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0.25", "192.168.0.1" };
 
             var userEvent = new UserLoggedInEvent
             {
                 UserId = Guid.NewGuid().ToString(),
                 Username = usernames[_random.Next(usernames.Length)],
-                IpAddress = ips[_random.Next(ips.Length)],
-                LoginTime = DateTime. UtcNow,
-                SessionId = Guid.NewGuid().ToString()
+                IpAddress = ips[_random.Next(ips.Length)]
             };
 
             var eventMessage = new EventMessage
             {
                 Topic = "UserLoggedInEvent",
                 Payload = JsonSerializer. Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime. UtcNow,
-                Source = "EventGenerator"
-            };
-
-            PublishEvent(eventMessage);
-            Console. WriteLine("[EventGenerator Process] Generated UserLoggedInEvent for: " + userEvent.Username);
-        }
-
-        private static void GenerateDataProcessedEvent()
-        {
-            string[] sources = { "CustomerDB", "OrdersDB", "InventoryDB", "AnalyticsDB", "LogsDB", "MetricsDB" };
-
-            var dataEvent = new DataProcessedEvent
-            {
-                ProcessId = Guid.NewGuid().ToString(),
-                DataSource = sources[_random.Next(sources. Length)],
-                RecordsProcessed = _random.Next(100, 10000),
-                ProcessedAt = DateTime. UtcNow,
-                ProcessingTimeMs = _random. NextDouble() * 2000,
-                Success = _random.Next(10) != 0  // 90% success rate
-            };
-
-            if (! dataEvent.Success)
-            {
-                string[] errors = { "Connection timeout", "Invalid data format", "Disk full", "Permission denied" };
-                dataEvent.ErrorMessage = errors[_random. Next(errors.Length)];
-            }
-
-            var eventMessage = new EventMessage
-            {
-                Topic = "DataProcessedEvent",
-                Payload = JsonSerializer. Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy. CamelCase }),
                 Timestamp = DateTime.UtcNow,
                 Source = "EventGenerator"
             };
 
             PublishEvent(eventMessage);
-
-            string status = dataEvent.Success ? "SUCCESS" : "FAILED";
-            Console. WriteLine("[EventGenerator Process] Generated DataProcessedEvent: " + status + " - " + dataEvent. RecordsProcessed + " records from " + dataEvent. DataSource);
+            Console.WriteLine("[EventGenerator] UserLoggedIn: " + userEvent.Username);
         }
+
+        private static void GenerateDataProcessedEvent()
+        {
+            string[] sources = { "CustomerDB", "OrdersDB", "InventoryDB", "AnalyticsDB" };
+
+            var dataEvent = new DataProcessedEvent
+            {
+                DataSource = sources[_random.Next(sources.Length)],
+                RecordsProcessed = _random.Next(100, 10000),
+                ProcessingTimeMs = _random. NextDouble() * 500,
+                Success = _random.Next(10) != 0
+            };
+
+            if (! dataEvent.Success)
+                dataEvent.ErrorMessage = "Simulated processing error";
+
+            var eventMessage = new EventMessage
+            {
+                Topic = "DataProcessedEvent",
+                Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Timestamp = DateTime. UtcNow,
+                Source = "EventGenerator"
+            };
+
+            PublishEvent(eventMessage);
+            Console.WriteLine("[EventGenerator] DataProcessed: " + dataEvent.DataSource);
+        }
+
+        private static void GenerateSystemMetricsEvent()
+        {
+            double cpuUsage = GetCpuUsage();
+            double memoryUsage = GetSystemMemoryUsage();
+            double diskUsage = GetDiskUsage();
+
+            var metricsEvent = new SystemMetricsEvent
+            {
+                MachineName = Environment. MachineName,
+                CpuUsagePercent = cpuUsage,
+                MemoryUsagePercent = memoryUsage,
+                DiskUsagePercent = diskUsage,
+                Timestamp = DateTime. UtcNow
+            };
+
+            var eventMessage = new EventMessage
+            {
+                Topic = "SystemMetricsEvent",
+                Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy. CamelCase }),
+                Timestamp = DateTime.UtcNow,
+                Source = "EventGenerator"
+            };
+
+            PublishEvent(eventMessage);
+            Console.WriteLine("[EventGenerator] SystemMetrics: CPU=" + cpuUsage. ToString("F1") + 
+                              "% RAM=" + memoryUsage.ToString("F1") + 
+                              "% Disk=" + diskUsage.ToString("F1") + "%");
+
+            // Check thresholds and publish alerts
+            CheckThresholds(cpuUsage, memoryUsage, diskUsage);
+        }
+
+        #endregion
+
+        #region System Metrics Collection
+
+        private static double GetCpuUsage()
+        {
+            // Base usage between 5-25%
+            double baseUsage = 5 + (_random.NextDouble() * 20);
+
+            // 10% chance of medium usage (25-50%)
+            if (_random.Next(10) == 0)
+            {
+                baseUsage = 25 + (_random.NextDouble() * 25);
+            }
+
+            // 5% chance of high spike (50-80%)
+            if (_random.Next(20) == 0)
+            {
+                baseUsage = 50 + (_random.NextDouble() * 30);
+            }
+
+            return Math.Min(100, baseUsage);
+        }
+
+        // Windows API for real memory usage
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MEMORYSTATUSEX
+        {
+            public uint dwLength;
+            public uint dwMemoryLoad;
+            public ulong ullTotalPhys;
+            public ulong ullAvailPhys;
+            public ulong ullTotalPageFile;
+            public ulong ullAvailPageFile;
+            public ulong ullTotalVirtual;
+            public ulong ullAvailVirtual;
+            public ulong ullAvailExtendedVirtual;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType. Bool)]
+        private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+        private static double GetSystemMemoryUsage()
+        {
+            try
+            {
+                if (RuntimeInformation.IsOSPlatform(OSPlatform. Windows))
+                {
+                    MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
+                    memStatus.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+
+                    if (GlobalMemoryStatusEx(ref memStatus))
+                    {
+                        return memStatus. dwMemoryLoad;
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through to simulated value
+            }
+
+            // Fallback: simulated memory usage
+            return 40 + (_random.NextDouble() * 40);
+        }
+
+        private static double GetDiskUsage()
+        {
+            try
+            {
+                var drive = new DriveInfo("C");
+                double used = drive.TotalSize - drive.AvailableFreeSpace;
+                return (used / drive.TotalSize) * 100;
+            }
+            catch
+            {
+                return 50 + (_random.NextDouble() * 30);
+            }
+        }
+
+        private static void CheckThresholds(double cpu, double memory, double disk)
+        {
+            // CPU alerts
+            if (cpu > 90)
+            {
+                PublishAlert("alert.critical", "CPU critical: " + cpu. ToString("F1") + "%");
+            }
+            else if (cpu > 75)
+            {
+                PublishAlert("alert.warning", "CPU high: " + cpu. ToString("F1") + "%");
+            }
+
+            // Memory alerts
+            if (memory > 90)
+            {
+                PublishAlert("alert.critical", "Memory critical: " + memory.ToString("F1") + "%");
+            }
+            else if (memory > 80)
+            {
+                PublishAlert("alert.warning", "Memory high: " + memory.ToString("F1") + "%");
+            }
+
+            // Disk alerts
+            if (disk > 95)
+            {
+                PublishAlert("alert.critical", "Disk almost full: " + disk.ToString("F1") + "%");
+            }
+            else if (disk > 85)
+            {
+                PublishAlert("alert.warning", "Disk space low: " + disk. ToString("F1") + "%");
+            }
+        }
+
+        private static void PublishAlert(string topic, string message)
+        {
+            var alertEvent = new EventMessage
+            {
+                Topic = topic,
+                Payload = message,
+                Timestamp = DateTime.UtcNow,
+                Source = "EventGenerator"
+            };
+
+            PublishEvent(alertEvent);
+            Console.WriteLine("[EventGenerator] ALERT: " + message);
+        }
+
+        #endregion
+
+        #region IPC
 
         private static void PublishEvent(EventMessage evt)
         {
             try
             {
-                var message = new IpcMessage
+                SendMessage(new IpcMessage
                 {
                     Type = IpcMessageType. Publish,
                     PluginName = "EventGenerator",
                     Event = evt
-                };
-                SendMessage(message);
+                });
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[EventGenerator Process] Failed to publish event: " + ex.Message);
+                Console.WriteLine("[EventGenerator] Publish error: " + ex.Message);
             }
         }
 
@@ -335,50 +482,14 @@ namespace EventGeneratorPlugin
         {
             try
             {
-                if (_pipeClient != null && _pipeClient.IsConnected)
+                if (_pipeClient != null && _pipeClient. IsConnected)
                 {
                     IpcProtocol. WriteMessage(_pipeClient, message);
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("[EventGenerator Process] SendMessage error: " + ex.Message);
-            }
+            catch { }
         }
 
-        private static void RunStandaloneMode()
-        {
-            Console.WriteLine("[EventGenerator Process] Running in standalone test mode.");
-            Console.WriteLine("[EventGenerator Process] Will generate events to console only.");
-            Console. WriteLine("[EventGenerator Process] Press 'S' to start, 'X' to stop, 'Q' to quit.");
-
-            while (true)
-            {
-                var key = Console.ReadKey(true);
-                if (key.Key == ConsoleKey.S)
-                {
-                    Console.WriteLine("Starting generator...");
-                    _generating = true;
-                    new Thread(() =>
-                    {
-                        while (_generating)
-                        {
-                            Console.WriteLine("[STANDALONE] Would generate event #" + (++_eventsGenerated));
-                            Thread. Sleep(_intervalMs);
-                        }
-                    }).Start();
-                }
-                else if (key.Key == ConsoleKey.X)
-                {
-                    Console.WriteLine("Stopping generator...");
-                    _generating = false;
-                }
-                else if (key.Key == ConsoleKey.Q)
-                {
-                    _generating = false;
-                    break;
-                }
-            }
-        }
+        #endregion
     }
 }

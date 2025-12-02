@@ -1,9 +1,10 @@
 ﻿using System;
-using System.Collections. Generic;
-using System.Linq;
-using System.Text. Json;
+using System.IO;
+using System. Linq;
+using System.Text.Json;
+using System.Threading;
 using Contracts;
-using Contracts.Events;
+using Contracts. Events;
 using Microkernel.Core;
 
 namespace Microkernel.Services
@@ -11,12 +12,27 @@ namespace Microkernel.Services
     public class CommandHandler
     {
         private readonly IKernel _kernel;
-        private readonly Dictionary<string, IDisposable> _subscriptions = new Dictionary<string, IDisposable>(StringComparer.OrdinalIgnoreCase);
-        private readonly List<string> _filters = new List<string>();
+        private readonly Random _random = new Random();
+        private static bool _muted = false;
+        private static bool _generating = false;
 
         public CommandHandler(IKernel kernel)
         {
             _kernel = kernel ??  throw new ArgumentNullException(nameof(kernel));
+        }
+
+        private void Print(string message)
+        {
+            if (! _muted)
+                Console.WriteLine(message);
+        }
+
+        private void PrintColor(string message, ConsoleColor color)
+        {
+            if (_muted) return;
+            Console.ForegroundColor = color;
+            Console.WriteLine(message);
+            Console.ResetColor();
         }
 
         public bool ProcessCommand(string input)
@@ -24,628 +40,604 @@ namespace Microkernel.Services
             if (string.IsNullOrWhiteSpace(input))
                 return false;
 
-            string[] parts = input. Split(new[] { ' ' }, 3, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
             string command = parts[0]. ToLowerInvariant();
+            string args = parts.Length > 1 ?  parts[1] : "";
 
-            try
+            switch (command)
             {
-                switch (command)
-                {
-                    case "help":
-                    case "? ":
-                        if (parts.Length > 1)
-                            ShowPluginHelp(parts[1]);
-                        else
-                            HelpRenderer.RenderGeneralHelp(_kernel. GetLoadedPlugins());
-                        return false;
+                case "help":
+                    ShowHelp(args);
+                    return false;
 
-                    case "status":
-                        ShowStatus();
-                        return false;
+                case "status":
+                    ShowStatus();
+                    return false;
 
-                    case "plugins":
-                    case "list":
-                        ListPlugins();
-                        return false;
+                case "plugins":
+                    ListPlugins();
+                    return false;
 
-                    case "send":
-                    case "publish":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: send <topic> [payload]");
-                        else
-                        {
-                            string topic = parts[1];
-                            string payload = parts.Length > 2 ?  parts[2] : "";
-                            SendEvent(topic, payload);
-                        }
-                        return false;
+                case "demo":
+                    RunDemo();
+                    return false;
 
-                    case "start":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: start <pluginname>");
-                        else
-                            StartPlugin(parts[1]);
-                        return false;
+                case "userlogin":
+                    SendUserLoggedInEvent(args);
+                    return false;
 
-                    case "stop":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: stop <pluginname>");
-                        else
-                            StopPlugin(parts[1]);
-                        return false;
+                case "dataprocessed":
+                    SendDataProcessedEvent(args);
+                    return false;
 
-                    case "subscribe":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: subscribe <topicPattern>");
-                        else
-                            Subscribe(parts[1]);
-                        return false;
+                case "metrics":
+                    SendSystemMetricsEvent();
+                    return false;
 
-                    case "unsubscribe":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: unsubscribe <topicPattern>");
-                        else
-                            Unsubscribe(parts[1]);
-                        return false;
+                case "send":
+                    SendCustomEvent(args);
+                    return false;
 
-                    case "subscriptions":
-                        ListSubscriptions();
-                        return false;
+                case "generate":
+                    ToggleGenerate(args);
+                    return false;
 
-                    case "filters":
-                        ListFilters();
-                        return false;
+                case "load":
+                    LoadPlugin(args);
+                    return false;
 
-                    case "filter":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: filter <topicPattern>");
-                        else
-                            AddFilter(parts[1]);
-                        return false;
+                case "unload":
+                    UnloadPlugin(args);
+                    return false;
 
-                    case "unfilter":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: unfilter <topicPattern>");
-                        else
-                            RemoveFilter(parts[1]);
-                        return false;
+                case "crash":
+                    CrashPlugin(args);
+                    return false;
 
-                    case "unload":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: unload <pluginName>");
-                        else
-                            UnloadPlugin(parts[1]);
-                        return false;
+                case "restart":
+                    RestartPlugin(args);
+                    return false;
 
-                    case "mute":
-                        ConsoleKernelLogger.SetMuted(true);
-                        Console.WriteLine("Console output muted.");
-                        return false;
+                case "debug":
+                    ToggleDebug(args);
+                    return false;
 
-                    case "unmute":
-                        ConsoleKernelLogger.SetMuted(false);
-                        Console.WriteLine("Console output unmuted.");
-                        return false;
+                case "mute":
+                    _muted = true;
+                    ConsoleKernelLogger.SetMuted(true);
+                    Console.WriteLine("Output muted.");
+                    return false;
 
-                    case "crash":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: crash <pluginName>");
-                        else
-                            CrashPlugin(parts[1]);
-                        return false;
+                case "unmute":
+                    _muted = false;
+                    ConsoleKernelLogger. SetMuted(false);
+                    Console.WriteLine("Output unmuted.");
+                    return false;
 
-                    case "restart":
-                        if (parts.Length < 2)
-                            Console.WriteLine("Usage: restart <pluginName>");
-                        else
-                            RestartPlugin(parts[1]);
-                        return false;
+                case "exit":
+                case "quit":
+                    return true;
 
-                    // REQUIRED BY ASSIGNMENT: UserLoggedInEvent
-                    case "userloggedin":
-                    case "userlogin":
-                    case "login":
-                        SendUserLoggedInEvent(parts. Length > 1 ? string.Join(" ", parts.Skip(1)) : null);
-                        return false;
-
-                    // REQUIRED BY ASSIGNMENT: DataProcessedEvent
-                    case "dataprocessed":
-                    case "processed":
-                        SendDataProcessedEvent(parts.Length > 1 ? string. Join(" ", parts. Skip(1)) : null);
-                        return false;
-
-                    // Demo command
-                    case "demo":
-                        RunDemo();
-                        return false;
-
-                    case "exit":
-                    case "quit":
-                    case "q":
-                        return true;
-                    
-                    case "debug":
-                        if (parts.Length > 1 && parts[1]. Equals("on", StringComparison.OrdinalIgnoreCase))
-                        {
-                            ConsoleKernelLogger.EnableDebug();
-                            Console.WriteLine("Debug output enabled.");
-                        }
-                        else if (parts.Length > 1 && parts[1].Equals("off", StringComparison.OrdinalIgnoreCase))
-                        {
-                            ConsoleKernelLogger.DisableDebug();
-                            Console.WriteLine("Debug output disabled.");
-                        }
-                        else
-                        {
-                            Console.WriteLine("Usage: debug on|off");
-                        }
-                        return false;
-
-                    default:
-                        Console.WriteLine("Unknown command: " + command + ". Type 'help' for commands.");
-                        return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Error: " + ex.Message);
-                Console.ResetColor();
-                return false;
+                default:
+                    Print("Unknown command.  Type 'help' for available commands.");
+                    return false;
             }
         }
 
-        /// <summary>
-        /// Sends a UserLoggedInEvent (REQUIRED by assignment).
-        /// </summary>
-        private void SendUserLoggedInEvent(string payload)
+        private void ShowHelp(string args)
         {
-            UserLoggedInEvent userEvent;
+            string topic = args.ToLowerInvariant(). Trim();
 
-            if (! string.IsNullOrWhiteSpace(payload))
+            if (string.IsNullOrEmpty(topic))
             {
-                try
-                {
-                    userEvent = JsonSerializer.Deserialize<UserLoggedInEvent>(payload, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-                }
-                catch
-                {
-                    userEvent = new UserLoggedInEvent
-                    {
-                        UserId = Guid.NewGuid().ToString(),
-                        Username = payload,
-                        IpAddress = "127.0.0. 1"
-                    };
-                }
+                ShowGeneralHelp();
+            }
+            else if (topic. Contains("event") || topic.Contains("generator"))
+            {
+                ShowEventGeneratorHelp();
+            }
+            else if (topic.Contains("metrics") || topic.Contains("logger"))
+            {
+                ShowMetricsLoggerHelp();
             }
             else
             {
-                var random = new Random();
-                string[] users = { "alice", "bob", "charlie", "diana", "eve" };
-                string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0. 25" };
-
-                userEvent = new UserLoggedInEvent
-                {
-                    UserId = Guid.NewGuid().ToString(),
-                    Username = users[random.Next(users.Length)],
-                    IpAddress = ips[random.Next(ips.Length)]
-                };
+                ShowGeneralHelp();
             }
-
-            var evt = new EventMessage
-            {
-                Topic = "UserLoggedInEvent",  // EXACT topic name as required
-                Payload = JsonSerializer.Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime.UtcNow,
-                Source = "CommandHandler"
-            };
-
-            _kernel. Publish(evt);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Published UserLoggedInEvent:");
-            Console.ResetColor();
-            Console.WriteLine($"  User: {userEvent. Username} (ID: {userEvent.UserId})");
-            Console. WriteLine($"  IP: {userEvent. IpAddress}");
-            Console.WriteLine($"  Session: {userEvent.SessionId}");
         }
 
-        /// <summary>
-        /// Sends a DataProcessedEvent (REQUIRED by assignment).
-        /// </summary>
-        private void SendDataProcessedEvent(string payload)
+        private void ShowGeneralHelp()
         {
-            DataProcessedEvent dataEvent;
+            Print(@"
+Microkernel Commands:
+=====================
 
-            if (!string. IsNullOrWhiteSpace(payload))
-            {
-                try
-                {
-                    dataEvent = JsonSerializer.Deserialize<DataProcessedEvent>(payload, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-                }
-                catch
-                {
-                    int records = 0;
-                    int. TryParse(payload, out records);
-                    dataEvent = new DataProcessedEvent
-                    {
-                        DataSource = "CommandLine",
-                        RecordsProcessed = records > 0 ? records : 100,
-                        ProcessingTimeMs = new Random().NextDouble() * 1000
-                    };
-                }
-            }
-            else
-            {
-                var random = new Random();
-                string[] sources = { "CustomerDB", "OrdersDB", "InventoryDB", "AnalyticsDB" };
+General:
+  help                  Show this help
+  help eventgenerator   Show EventGenerator plugin help
+  help metricslogger    Show MetricsLogger plugin help
+  status                Show kernel status
+  plugins               List plugin processes
 
-                dataEvent = new DataProcessedEvent
-                {
-                    DataSource = sources[random.Next(sources.Length)],
-                    RecordsProcessed = random.Next(50, 5000),
-                    ProcessingTimeMs = random.NextDouble() * 2000,
-                    Success = random.Next(10) != 0
-                };
+Events:
+  demo                  Run demo (sends test events)
+  userlogin [name]      Send UserLoggedInEvent
+  dataprocessed [count] Send DataProcessedEvent
+  metrics               Send SystemMetricsEvent
+  send <topic> [data]   Send custom event
 
-                if (! dataEvent.Success)
-                    dataEvent.ErrorMessage = "Simulated processing error";
-            }
+Event Generation:
+  generate              Toggle auto-generation on/off
+  generate <ms>         Start with interval (e.g., generate 1000)
 
-            var evt = new EventMessage
-            {
-                Topic = "DataProcessedEvent",  // EXACT topic name as required
-                Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime. UtcNow,
-                Source = "CommandHandler"
-            };
+Plugin Management:
+  load <name>           Load a plugin
+  unload <plugin>       Unload a plugin
+  crash <plugin>        Kill a plugin (fault isolation test)
+  restart <plugin>      Restart a plugin
 
-            _kernel.Publish(evt);
-
-            Console. ForegroundColor = dataEvent.Success ? ConsoleColor.Green : ConsoleColor.Yellow;
-            Console. WriteLine($"Published DataProcessedEvent:");
-            Console.ResetColor();
-            Console.WriteLine($"  Source: {dataEvent.DataSource}");
-            Console.WriteLine($"  Records: {dataEvent.RecordsProcessed}");
-            Console. WriteLine($"  Time: {dataEvent. ProcessingTimeMs:F2}ms");
-            Console.WriteLine($"  Success: {dataEvent.Success}");
-            if (!dataEvent.Success)
-                Console.WriteLine($"  Error: {dataEvent.ErrorMessage}");
+Output Control:
+  debug on|off          Toggle debug output
+  mute / unmute         Mute/unmute output
+  exit                  Shutdown and exit
+");
         }
 
-        /// <summary>
-        /// Runs demo with UserLoggedInEvent and DataProcessedEvent. 
-        /// </summary>
-        private void RunDemo()
+        private void ShowEventGeneratorHelp()
         {
-            Console. ForegroundColor = ConsoleColor. Cyan;
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║     IKT300 Microkernel Demo - Required Events          ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝");
-            Console.ResetColor();
-            Console.WriteLine();
+            Print(@"
+EventGenerator Plugin
+=====================
 
-            Console.WriteLine("1.  Sending UserLoggedInEvent...");
-            SendUserLoggedInEvent(null);
-            Console.WriteLine();
+Description:
+  Generates system metrics and events at regular intervals. 
+  Collects real CPU, RAM, and Disk usage from your system.
 
-            System.Threading.Thread. Sleep(500);
+Commands:
+  generate              Toggle auto-generation on/off
+  generate <ms>         Start with custom interval in milliseconds
+  send generator. now    Generate one metric immediately
+  send generator.interval <seconds>  Set interval in seconds
 
-            Console. WriteLine("2.  Sending DataProcessedEvent...");
-            SendDataProcessedEvent(null);
-            Console.WriteLine();
+Events Generated:
+  - SystemMetricsEvent  Real system metrics (CPU, RAM, Disk)
+  - UserLoggedInEvent   Random user login simulation (every 3rd cycle)
+  - DataProcessedEvent  Random data processing (every 5th cycle)
+  - alert.warning       When metrics exceed warning thresholds
+  - alert.critical      When metrics exceed critical thresholds
 
-            System.Threading.Thread.Sleep(500);
+Thresholds:
+  CPU Warning: 75%  | Critical: 90%
+  RAM Warning: 80%  | Critical: 90%
+  Disk Warning: 85% | Critical: 95%
 
-            Console.WriteLine("3. Sending another UserLoggedInEvent...");
-            SendUserLoggedInEvent(null);
-            Console.WriteLine();
-
-            System.Threading. Thread.Sleep(500);
-
-            Console. WriteLine("4.  Sending another DataProcessedEvent.. .");
-            SendDataProcessedEvent(null);
-            Console. WriteLine();
-
-            Console.ForegroundColor = ConsoleColor. Cyan;
-            Console.WriteLine("Demo complete!  MetricsLogger should have logged all events.");
-            Console.ResetColor();
+Default interval: 3000ms (3 seconds)
+Status: Generation is " + (_generating ? "ON" : "OFF") + @"
+");
         }
 
-        // ...  rest of existing methods (StartPlugin, StopPlugin, etc.) remain the same ... 
-
-        private void StartPlugin(string pluginName)
+        private void ShowMetricsLoggerHelp()
         {
-            var pluginInfo = FindPlugin(pluginName);
-            if (pluginInfo == null) return;
+            Print(@"
+MetricsLogger Plugin
+====================
 
-            if (pluginInfo.State == "Faulted")
-            {
-                Console. ForegroundColor = ConsoleColor.Yellow;
-                Console. WriteLine($"Plugin '{pluginInfo.Name}' is FAULTED. Use 'restart {pluginInfo.Name}' first.");
-                Console. ResetColor();
-                return;
-            }
+Description:
+  Receives events from other plugins and logs them to a file. 
+  All events are timestamped and formatted for easy reading.
 
-            string topic = GetPluginTopic(pluginInfo. Name, "start");
-            var evt = new EventMessage { Topic = topic, Payload = "", Timestamp = DateTime. UtcNow, Source = "Console" };
-            _kernel. Publish(evt);
-            Console.WriteLine("Started: " + pluginInfo.Name);
-        }
+Log File Location:
+  Logs/metrics_YYYY-MM-DD. log
 
-        private void StopPlugin(string pluginName)
-        {
-            var pluginInfo = FindPlugin(pluginName);
-            if (pluginInfo == null) return;
+Events Logged:
+  - UserLoggedInEvent   -> USER_LOGIN | User: X | IP: X. X.X.X
+  - DataProcessedEvent  -> DATA_PROCESSED | Source: X | Records: N
+  - SystemMetricsEvent  -> SYSTEM_METRICS | CPU: X% | RAM: X% | Disk: X%
+  - Custom events       -> EVENT | Topic: X | Payload: ... 
 
-            if (pluginInfo.State == "Faulted")
-            {
-                Console.ForegroundColor = ConsoleColor. Yellow;
-                Console.WriteLine($"Plugin '{pluginInfo. Name}' is FAULTED. Use 'restart {pluginInfo.Name}' first.");
-                Console.ResetColor();
-                return;
-            }
-
-            string topic = GetPluginTopic(pluginInfo.Name, "stop");
-            var evt = new EventMessage { Topic = topic, Payload = "", Timestamp = DateTime. UtcNow, Source = "Console" };
-            _kernel.Publish(evt);
-            Console.WriteLine("Stopped: " + pluginInfo.Name);
-        }
-
-        private PluginInfo FindPlugin(string pluginName)
-        {
-            var plugins = _kernel.GetLoadedPlugins();
-            var plugin = plugins.FirstOrDefault(p => p.Name. Equals(pluginName, StringComparison.OrdinalIgnoreCase));
-            if (plugin == null)
-                plugin = plugins.FirstOrDefault(p => p.Name.StartsWith(pluginName, StringComparison.OrdinalIgnoreCase));
-            if (plugin == null && pluginName. Equals("generator", StringComparison.OrdinalIgnoreCase))
-                plugin = plugins.FirstOrDefault(p => p.Name. Equals("EventGenerator", StringComparison.OrdinalIgnoreCase));
-
-            if (plugin == null)
-            {
-                Console. WriteLine("Plugin not found: " + pluginName);
-                if (plugins.Count > 0)
-                {
-                    Console. WriteLine("Available plugins:");
-                    foreach (var p in plugins)
-                        Console.WriteLine("  " + p. Name);
-                }
-            }
-            return plugin;
-        }
-
-        private string GetPluginTopic(string pluginName, string action)
-        {
-            if (pluginName.Equals("EventGenerator", StringComparison.OrdinalIgnoreCase))
-                return "generator." + action;
-            return pluginName. ToLowerInvariant() + "." + action;
-        }
-
-        private void ShowPluginHelp(string pluginName)
-        {
-            var plugin = _kernel.GetPlugin(pluginName);
-            if (plugin == null)
-                HelpRenderer.RenderPluginNotFound(pluginName, _kernel.GetLoadedPlugins());
-            else
-                HelpRenderer.RenderPluginHelp(plugin);
+This plugin has no commands - it automatically logs all received events.
+");
         }
 
         private void ShowStatus()
         {
-            var plugins = _kernel. GetLoadedPlugins();
-            Console. WriteLine();
-            Console.WriteLine($"  Kernel State:    {(_kernel as Kernel)?.State}");
-            Console. WriteLine($"  Active Plugins:  {plugins.Count(p => p.State == "Running")}");
-            Console.WriteLine($"  Faulted Plugins: {plugins.Count(p => p.State == "Faulted")}");
-            Console.WriteLine($"  Total Plugins:   {plugins.Count}");
-            Console. WriteLine();
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("  Required Event Commands:");
-            Console. WriteLine("    userlogin [json|username]  - Send UserLoggedInEvent");
-            Console. WriteLine("    dataprocessed [json|count] - Send DataProcessedEvent");
-            Console.WriteLine("    demo                       - Run demo with both events");
-            Console.ResetColor();
-            Console.WriteLine();
+            var (total, running, faulted) = _kernel.GetPluginCounts();
+
+            Print("");
+            Print("Kernel Status: " + _kernel. State);
+            Print("Plugins: " + total + " total, " + running + " running, " + faulted + " faulted");
+            Print("Event Generation: " + (_generating ? "ON" : "OFF"));
+            Print("");
         }
 
         private void ListPlugins()
         {
-            var plugins = _kernel.GetLoadedPlugins();
+            var plugins = _kernel. GetLoadedPlugins();
+
             if (plugins.Count == 0)
             {
-                Console. WriteLine("No plugins loaded.");
+                Print("No plugins loaded.");
                 return;
             }
 
-            Console.WriteLine();
-            Console.WriteLine($"Loaded Plugins ({plugins.Count}):");
-            Console.WriteLine(new string('-', 60));
-            Console.WriteLine($"{"Name",-20} {"Version",-10} {"State",-12} Loaded At");
-            Console. WriteLine(new string('-', 60));
+            Print("");
+            Print(string.Format("{0,-28} {1,-10} {2,-8} {3}", "Plugin", "State", "PID", "Started"));
+            Print(new string('-', 60));
 
             foreach (var plugin in plugins)
             {
-                Console. ForegroundColor = plugin.State == "Faulted" ?  ConsoleColor.Red :
-                                         plugin.State == "Running" ? ConsoleColor.Green : ConsoleColor.Yellow;
-                Console. WriteLine($"{plugin. Name,-20} {plugin.Version,-10} {plugin.State,-12} {plugin.LoadedAt:HH:mm:ss}");
-                Console.ResetColor();
+                if (! _muted)
+                {
+                    var color = plugin.State == "Running" ? ConsoleColor.Green :
+                               plugin.State == "Faulted" ? ConsoleColor. Red : ConsoleColor.Yellow;
+
+                    Console.ForegroundColor = color;
+                    Console.WriteLine(string.Format("{0,-28} {1,-10} {2,-8} {3:HH:mm:ss}",
+                        plugin.Name, plugin.State, plugin. ProcessId, plugin.LoadedAt));
+                    Console.ResetColor();
+                }
             }
-            Console.WriteLine();
+            Print("");
         }
 
-        private void SendEvent(string topic, string payload)
+        private void RunDemo()
         {
-            var message = new EventMessage { Topic = topic, Payload = payload, Timestamp = DateTime. UtcNow };
-            _kernel. Publish(message);
-            Console.WriteLine("Event published.");
+            Print("");
+            Print("=== Running Demo ===");
+            Print("");
+
+            Print("1.  Sending UserLoggedInEvent...");
+            SendUserLoggedInEvent("");
+            Thread.Sleep(300);
+
+            Print("");
+            Print("2. Sending DataProcessedEvent...");
+            SendDataProcessedEvent("");
+            Thread.Sleep(300);
+
+            Print("");
+            Print("3.  Sending SystemMetricsEvent...");
+            SendSystemMetricsEvent();
+            Thread.Sleep(300);
+
+            Print("");
+            Print("=== Demo Complete ===");
+            Print("");
         }
 
-        private void Subscribe(string pattern)
+        private void ToggleGenerate(string args)
         {
-            if (_subscriptions.ContainsKey(pattern))
+            // Parse interval if provided
+            int interval = 0;
+            if (! string.IsNullOrWhiteSpace(args) && int.TryParse(args. Trim(), out int parsed) && parsed >= 100)
             {
-                Console.WriteLine("Already subscribed to: " + pattern);
-                return;
+                interval = parsed;
             }
+
+            if (_generating)
+            {
+                // Stop
+                _generating = false;
+                var stopEvt = new EventMessage
+                {
+                    Topic = "generator. stop",
+                    Payload = "",
+                    Timestamp = DateTime.UtcNow,
+                    Source = "Console"
+                };
+                _kernel. Publish(stopEvt);
+                PrintColor("Event generation stopped.", ConsoleColor.Yellow);
+            }
+            else
+            {
+                // Start
+                _generating = true;
+
+                if (interval > 0)
+                {
+                    var intervalEvt = new EventMessage
+                    {
+                        Topic = "generator.interval",
+                        Payload = interval.ToString(),
+                        Timestamp = DateTime.UtcNow,
+                        Source = "Console"
+                    };
+                    _kernel.Publish(intervalEvt);
+                    Print("Interval set to " + interval + "ms");
+                }
+
+                var startEvt = new EventMessage
+                {
+                    Topic = "generator. start",
+                    Payload = "",
+                    Timestamp = DateTime.UtcNow,
+                    Source = "Console"
+                };
+                _kernel. Publish(startEvt);
+                PrintColor("Event generation started.", ConsoleColor. Green);
+            }
+        }
+
+        private void SendUserLoggedInEvent(string username)
+        {
+            string[] names = { "alice", "bob", "charlie", "diana", "eve" };
+            string[] ips = { "192.168.1.100", "10.0. 0.50", "172.16.0.25" };
+
+            var userEvent = new UserLoggedInEvent
+            {
+                UserId = Guid.NewGuid().ToString(),
+                Username = string.IsNullOrWhiteSpace(username) ? names[_random.Next(names.Length)] : username,
+                IpAddress = ips[_random. Next(ips. Length)]
+            };
+
+            var evt = new EventMessage
+            {
+                Topic = "UserLoggedInEvent",
+                Payload = JsonSerializer.Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Timestamp = DateTime.UtcNow,
+                Source = "Console"
+            };
+
+            _kernel. Publish(evt);
+            Print("  → User: " + userEvent.Username + ", IP: " + userEvent.IpAddress);
+        }
+
+        private void SendDataProcessedEvent(string args)
+        {
+            string[] sources = { "CustomerDB", "OrdersDB", "InventoryDB" };
+
+            int recordCount = 0;
+            if (!string.IsNullOrWhiteSpace(args) && int.TryParse(args.Trim(), out int parsed))
+            {
+                recordCount = parsed;
+            }
+
+            var dataEvent = new DataProcessedEvent
+            {
+                DataSource = sources[_random.Next(sources.Length)],
+                RecordsProcessed = recordCount > 0 ? recordCount : _random.Next(100, 5000),
+                ProcessingTimeMs = _random.NextDouble() * 1000,
+                Success = _random.Next(10) != 0
+            };
+
+            if (! dataEvent.Success)
+                dataEvent.ErrorMessage = "Simulated error";
+
+            var evt = new EventMessage
+            {
+                Topic = "DataProcessedEvent",
+                Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Timestamp = DateTime. UtcNow,
+                Source = "Console"
+            };
+
+            _kernel. Publish(evt);
+            Print("  → Source: " + dataEvent.DataSource + ", Records: " + dataEvent.RecordsProcessed + ", Success: " + dataEvent.Success);
+        }
+
+        private void SendSystemMetricsEvent()
+        {
+            double cpu = 20 + _random. NextDouble() * 60;
+            double ram = 40 + _random.NextDouble() * 40;
+            double disk = 50 + _random. NextDouble() * 30;
+
             try
             {
-                IDisposable sub = _kernel.Subscribe(pattern, (evt) =>
+                var drive = new DriveInfo("C");
+                disk = ((drive.TotalSize - drive.AvailableFreeSpace) / (double)drive.TotalSize) * 100;
+            }
+            catch { }
+
+            var metricsEvent = new SystemMetricsEvent
+            {
+                MachineName = Environment.MachineName,
+                CpuUsagePercent = cpu,
+                MemoryUsagePercent = ram,
+                DiskUsagePercent = disk,
+                Timestamp = DateTime. UtcNow
+            };
+
+            var evt = new EventMessage
+            {
+                Topic = "SystemMetricsEvent",
+                Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Timestamp = DateTime.UtcNow,
+                Source = "Console"
+            };
+
+            _kernel.Publish(evt);
+            Print("  → CPU: " + cpu. ToString("F1") + "%, RAM: " + ram.ToString("F1") + "%, Disk: " + disk.ToString("F1") + "%");
+        }
+
+        private void SendCustomEvent(string args)
+        {
+            var parts = args.Split(' ', 2);
+            string topic = parts[0];
+            string payload = parts.Length > 1 ? parts[1] : "";
+
+            if (string.IsNullOrWhiteSpace(topic))
+            {
+                Print("Usage: send <topic> [payload]");
+                return;
+            }
+
+            var evt = new EventMessage
+            {
+                Topic = topic,
+                Payload = payload,
+                Timestamp = DateTime. UtcNow,
+                Source = "Console"
+            };
+
+            _kernel.Publish(evt);
+            Print("Event sent: " + topic);
+        }
+
+        private void LoadPlugin(string args)
+        {
+            if (string.IsNullOrWhiteSpace(args))
+            {
+                Print("Usage: load <plugin-name>");
+                Print("Available: MetricsLogger, EventGenerator");
+                return;
+            }
+
+            string input = args.Trim();
+            string exePath;
+
+            if (Path.IsPathRooted(input))
+            {
+                exePath = input;
+            }
+            else if (input.EndsWith(".exe", StringComparison. OrdinalIgnoreCase))
+            {
+                exePath = Path. Combine(AppDomain.CurrentDomain.BaseDirectory, input);
+            }
+            else
+            {
+                exePath = Path. Combine(AppDomain.CurrentDomain. BaseDirectory, input + ".exe");
+            }
+
+            if (! File.Exists(exePath))
+            {
+                Print("File not found: " + exePath);
+                Print("");
+                Print("Available plugins:");
+                try
                 {
-                    if (_filters.Count > 0 && ! _filters.Any(f => MatchesTopic(evt. Topic, f)))
-                        return;
-                    Console.WriteLine($"{evt.Topic}: {evt.Payload}");
-                });
-                _subscriptions[pattern] = sub;
-                Console.WriteLine("Subscribed to: " + pattern);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Failed to subscribe: " + ex.Message);
-            }
-        }
+                    var exeFiles = Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "*.exe")
+                        .Where(f => !Path.GetFileName(f). Equals("Microkernel.exe", StringComparison. OrdinalIgnoreCase))
+                        .ToList();
 
-        private void Unsubscribe(string pattern)
-        {
-            if (!_subscriptions.TryGetValue(pattern, out var sub))
-            {
-                Console.WriteLine("Not subscribed to: " + pattern);
+                    foreach (var file in exeFiles)
+                    {
+                        Print("  " + Path.GetFileNameWithoutExtension(file));
+                    }
+                }
+                catch { }
                 return;
             }
-            try { sub.Dispose(); } catch { }
-            _subscriptions.Remove(pattern);
-            Console.WriteLine("Unsubscribed from: " + pattern);
-        }
 
-        private void ListSubscriptions()
-        {
-            var kernelAuto = _kernel. GetAutoSubscriptions() ??  new List<string>();
-            if (_subscriptions.Count == 0 && kernelAuto.Count == 0)
-            {
-                Console.WriteLine("No subscriptions.");
-                return;
-            }
-            Console.WriteLine("Active subscriptions:");
-            foreach (var p in kernelAuto)
-                Console.WriteLine("  (auto) " + p);
-            foreach (var p in _subscriptions. Keys)
-                Console.WriteLine("  " + p);
-        }
+            string pluginName = Path. GetFileNameWithoutExtension(exePath) + "Process";
 
-        private void AddFilter(string pattern)
-        {
-            if (_filters.Contains(pattern))
-            {
-                Console. WriteLine("Filter already present: " + pattern);
-                return;
-            }
-            _filters.Add(pattern);
-            Console. WriteLine("Added filter: " + pattern);
-        }
+            Print("Loading plugin: " + pluginName);
 
-        private void RemoveFilter(string pattern)
-        {
-            if (!_filters.Remove(pattern))
+            if (_kernel.LoadPlugin(pluginName, exePath))
             {
-                Console. WriteLine("Filter not found: " + pattern);
-                return;
+                Thread. Sleep(500);
+                PrintColor("Plugin loaded successfully.", ConsoleColor. Green);
             }
-            Console.WriteLine("Removed filter: " + pattern);
-        }
-
-        private void ListFilters()
-        {
-            if (_filters.Count == 0)
+            else
             {
-                Console.WriteLine("No active filters.");
-                return;
+                PrintColor("Failed to load plugin.", ConsoleColor.Red);
             }
-            Console.WriteLine("Active filters:");
-            foreach (var f in _filters)
-                Console.WriteLine("  " + f);
         }
 
         private void UnloadPlugin(string pluginName)
         {
-            var pluginInfo = FindPlugin(pluginName);
-            if (pluginInfo == null) return;
-            bool result = _kernel.UnloadPlugin(pluginInfo. Name);
-            Console.WriteLine(result ?  $"Plugin unloaded: {pluginInfo.Name}" : $"Failed to unload plugin: {pluginInfo.Name}");
+            if (string.IsNullOrWhiteSpace(pluginName))
+            {
+                Print("Usage: unload <plugin>");
+                return;
+            }
+
+            var plugins = _kernel.GetLoadedPlugins();
+            var match = plugins.FirstOrDefault(p =>
+                p.Name.Contains(pluginName, StringComparison. OrdinalIgnoreCase));
+
+            if (match == null)
+            {
+                Print("Plugin not found: " + pluginName);
+                return;
+            }
+
+            Print("Unloading plugin: " + match. Name);
+
+            if (_kernel.UnloadPlugin(match.Name))
+            {
+                PrintColor("Plugin unloaded.", ConsoleColor.Green);
+            }
+            else
+            {
+                Print("Failed to unload plugin.");
+            }
         }
 
         private void CrashPlugin(string pluginName)
         {
-            var pluginInfo = FindPlugin(pluginName);
-            if (pluginInfo == null) return;
-
-            if (pluginInfo. State == "Faulted")
+            if (string.IsNullOrWhiteSpace(pluginName))
             {
-                Console. ForegroundColor = ConsoleColor.Yellow;
-                Console. WriteLine($"Plugin '{pluginInfo.Name}' is already FAULTED.");
-                Console.ResetColor();
+                Print("Usage: crash <plugin>");
                 return;
             }
 
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Crashing plugin: " + pluginInfo. Name);
-            Console.ResetColor();
+            var plugins = _kernel.GetLoadedPlugins();
+            var match = plugins.FirstOrDefault(p =>
+                p.Name.Contains(pluginName, StringComparison. OrdinalIgnoreCase));
 
-            bool result = _kernel. CrashPlugin(pluginInfo.Name);
-            if (result)
+            if (match == null)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console. WriteLine($"Plugin {pluginInfo.Name} is now FAULTED.");
-                Console. WriteLine($"Use 'restart {pluginInfo.Name}' to recover.");
-                Console. ResetColor();
+                Print("Plugin not found: " + pluginName);
+                return;
+            }
+
+            Print("Crashing plugin: " + match.Name);
+
+            if (_kernel. CrashPlugin(match.Name))
+            {
+                PrintColor("Plugin crashed.  Kernel and other plugins continue running.", ConsoleColor. Yellow);
             }
             else
             {
-                Console.WriteLine("Failed to crash plugin: " + pluginInfo.Name);
+                Print("Failed to crash plugin.");
             }
         }
 
         private void RestartPlugin(string pluginName)
         {
-            var pluginInfo = FindPlugin(pluginName);
-            if (pluginInfo == null) return;
-
-            Console.WriteLine("Restarting plugin: " + pluginInfo.Name);
-            bool result = _kernel. RestartPlugin(pluginInfo.Name);
-
-            if (result)
+            if (string.IsNullOrWhiteSpace(pluginName))
             {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"Plugin {pluginInfo.Name} restarted successfully.");
-                Console.ResetColor();
+                Print("Usage: restart <plugin>");
+                return;
+            }
+
+            var plugins = _kernel.GetLoadedPlugins();
+            var match = plugins.FirstOrDefault(p =>
+                p.Name.Contains(pluginName, StringComparison. OrdinalIgnoreCase));
+
+            if (match == null)
+            {
+                Print("Plugin not found: " + pluginName);
+                return;
+            }
+
+            Print("Restarting plugin: " + match.Name);
+
+            if (_kernel.RestartPlugin(match.Name))
+            {
+                PrintColor("Plugin restarted successfully.", ConsoleColor. Green);
             }
             else
             {
-                Console. ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Failed to restart plugin: {pluginInfo.Name}");
-                Console.ResetColor();
+                Print("Failed to restart plugin.");
             }
         }
 
-        private static bool MatchesTopic(string topic, string pattern)
+        private void ToggleDebug(string args)
         {
-            if (string. Equals(topic, pattern, StringComparison.OrdinalIgnoreCase)) return true;
-            if (pattern == "*") return true;
-            if (! pattern.Contains("*")) return string.Equals(topic, pattern, StringComparison. OrdinalIgnoreCase);
-
-            try
+            if (args. Equals("on", StringComparison.OrdinalIgnoreCase))
             {
-                var escaped = System.Text.RegularExpressions. Regex.Escape(pattern). Replace("\\*", ".*");
-                return System.Text.RegularExpressions. Regex.IsMatch(topic ??  "", "^" + escaped + "$",
-                    System. Text.RegularExpressions.RegexOptions.IgnoreCase);
+                ConsoleKernelLogger.EnableDebug();
+                Print("Debug output enabled.");
             }
-            catch
+            else if (args.Equals("off", StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                ConsoleKernelLogger.DisableDebug();
+                Print("Debug output disabled.");
+            }
+            else
+            {
+                Print("Usage: debug on|off");
             }
         }
     }

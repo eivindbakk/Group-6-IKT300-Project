@@ -25,7 +25,6 @@ namespace Contracts.IPC
         Start,
         Stop,
         Event,
-        Log,
         Publish,
         Heartbeat,
         Shutdown,
