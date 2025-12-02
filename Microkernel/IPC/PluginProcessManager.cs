@@ -3,9 +3,9 @@ using System.Collections. Concurrent;
 using System.Collections.Generic;
 using System. Diagnostics;
 using System.IO;
-using System. IO. Pipes;
+using System. IO.Pipes;
 using System.Linq;
-using System.Threading;
+using System. Threading;
 using System. Threading.Tasks;
 using Contracts;
 using Contracts.IPC;
@@ -15,7 +15,7 @@ namespace Microkernel.IPC
 {
     /// <summary>
     /// Manages plugin processes and IPC communication via named pipes. 
-    /// This provides TRUE OS-LEVEL PROCESS ISOLATION as required by the assignment.
+    /// This provides TRUE OS-LEVEL PROCESS ISOLATION as required by the assignment. 
     /// </summary>
     public class PluginProcessManager : IDisposable
     {
@@ -24,7 +24,9 @@ namespace Microkernel.IPC
         private readonly CancellationTokenSource _cts;
         private bool _disposed;
 
+        // Events for communication back to Kernel
         public event Action<string, string> OnPluginLog;
+        public event Action<EventMessage> OnPluginPublish;
 
         public PluginProcessManager(IKernelLogger logger)
         {
@@ -34,7 +36,7 @@ namespace Microkernel.IPC
         }
 
         /// <summary>
-        /// Launches a plugin as a SEPARATE OS PROCESS with named pipe IPC. 
+        /// Launches a plugin as a SEPARATE OS PROCESS with named pipe IPC.
         /// </summary>
         public bool LaunchPlugin(string pluginName, string executablePath)
         {
@@ -64,7 +66,7 @@ namespace Microkernel.IPC
                     PipeDirection.InOut,
                     1,
                     PipeTransmissionMode. Byte,
-                    PipeOptions.Asynchronous);
+                    PipeOptions. Asynchronous);
 
                 // Start the plugin process
                 var processInfo = new ProcessStartInfo
@@ -80,7 +82,7 @@ namespace Microkernel.IPC
                 var process = Process.Start(processInfo);
                 if (process == null)
                 {
-                    pipeServer. Dispose();
+                    pipeServer.Dispose();
                     _logger.Error("Failed to start plugin process: " + pluginName);
                     return false;
                 }
@@ -91,7 +93,7 @@ namespace Microkernel.IPC
                     Process = process,
                     PipeServer = pipeServer,
                     PipeName = pipeName,
-                    State = PluginProcessState.Starting,
+                    State = PluginProcessState. Starting,
                     StartedAt = DateTime. UtcNow
                 };
 
@@ -118,22 +120,22 @@ namespace Microkernel.IPC
         {
             try
             {
-                _logger.Debug("Waiting for plugin '" + info. PluginName + "' to connect.. .");
+                _logger.Debug("Waiting for plugin '" + info. PluginName + "' to connect...");
 
                 // Wait for plugin to connect with timeout
                 var connectTask = info.PipeServer.WaitForConnectionAsync(token);
                 var timeoutTask = Task. Delay(30000, token);
-                
+
                 if (await Task.WhenAny(connectTask, timeoutTask) != connectTask)
                 {
                     _logger.Error("Plugin '" + info. PluginName + "' connection timeout.");
-                    info. State = PluginProcessState.Faulted;
+                    info.State = PluginProcessState. Faulted;
                     return;
                 }
 
                 await connectTask;
                 info.State = PluginProcessState.Connected;
-                _logger.Info("Plugin '" + info. PluginName + "' connected via named pipe.");
+                _logger.Info("Plugin '" + info.PluginName + "' connected via named pipe.");
 
                 // Send start command
                 var startMessage = new IpcMessage
@@ -172,7 +174,7 @@ namespace Microkernel.IPC
             catch (Exception ex)
             {
                 _logger.Error("Plugin '" + info. PluginName + "' connection error: " + ex.Message);
-                info. State = PluginProcessState.Faulted;
+                info.State = PluginProcessState. Faulted;
                 info.LastError = ex.Message;
             }
         }
@@ -181,17 +183,25 @@ namespace Microkernel.IPC
         {
             switch (message.Type)
             {
-                case IpcMessageType.Log:
+                case IpcMessageType. Log:
                     OnPluginLog?. Invoke(info.PluginName, message.Response);
                     _logger.Info("[Process:" + info.PluginName + "] " + message.Response);
                     break;
 
-                case IpcMessageType. Heartbeat:
+                case IpcMessageType.Heartbeat:
                     info.LastHeartbeat = DateTime. UtcNow;
                     break;
 
                 case IpcMessageType. Ack:
-                    _logger.Debug("Plugin '" + info. PluginName + "' acknowledged: " + message. Response);
+                    _logger.Debug("Plugin '" + info. PluginName + "' acknowledged: " + message.Response);
+                    break;
+
+                case IpcMessageType.Publish:
+                    if (message.Event != null)
+                    {
+                        _logger.Debug("Plugin '" + info. PluginName + "' published event: " + message. Event. Topic);
+                        OnPluginPublish?. Invoke(message. Event);
+                    }
                     break;
             }
         }
@@ -236,7 +246,7 @@ namespace Microkernel.IPC
             {
                 var message = new IpcMessage
                 {
-                    Type = IpcMessageType.Event,
+                    Type = IpcMessageType. Event,
                     PluginName = pluginName,
                     Event = evt
                 };
@@ -245,7 +255,7 @@ namespace Microkernel.IPC
             }
             catch (Exception ex)
             {
-                _logger. Error("Failed to send event to plugin '" + pluginName + "': " + ex.Message);
+                _logger.Error("Failed to send event to plugin '" + pluginName + "': " + ex.Message);
                 info.State = PluginProcessState. Faulted;
                 info.LastError = ex.Message;
                 return false;
@@ -259,7 +269,7 @@ namespace Microkernel.IPC
         {
             foreach (var kvp in _processes)
             {
-                if (kvp.Value.State == PluginProcessState.Running)
+                if (kvp. Value.State == PluginProcessState. Running)
                 {
                     SendEvent(kvp. Key, evt);
                 }
@@ -267,7 +277,23 @@ namespace Microkernel.IPC
         }
 
         /// <summary>
-        /// Stops a plugin process.
+        /// Broadcasts an event to all plugins EXCEPT the source plugin.
+        /// Used to prevent infinite loops when a plugin publishes an event.
+        /// </summary>
+        public void BroadcastEventExcept(EventMessage evt, string excludePluginName)
+        {
+            foreach (var kvp in _processes)
+            {
+                if (kvp.Value.State == PluginProcessState.Running &&
+                    ! kvp.Key. Equals(excludePluginName, StringComparison.OrdinalIgnoreCase))
+                {
+                    SendEvent(kvp.Key, evt);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Stops a plugin process. 
         /// </summary>
         public bool StopPlugin(string pluginName)
         {
@@ -326,13 +352,13 @@ namespace Microkernel.IPC
                 var info = kvp.Value;
                 int pid = 0;
                 try { pid = info.Process?. Id ??  0; } catch { }
-                
+
                 result.Add(new PluginProcessStatus
                 {
                     PluginName = info.PluginName,
                     ProcessId = pid,
                     State = info.State. ToString(),
-                    StartedAt = info.StartedAt,
+                    StartedAt = info. StartedAt,
                     LastHeartbeat = info. LastHeartbeat,
                     LastError = info.LastError
                 });
@@ -344,7 +370,7 @@ namespace Microkernel.IPC
         {
             if (_disposed) return;
 
-            _cts.Cancel();
+            _cts. Cancel();
 
             foreach (var kvp in _processes. ToArray())
             {

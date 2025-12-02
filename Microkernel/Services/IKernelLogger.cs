@@ -1,9 +1,5 @@
 ﻿namespace Microkernel. Services
 {
-    /// <summary>
-    /// Logging abstraction for the kernel. 
-    /// Allows pluggable logging implementations. 
-    /// </summary>
     public interface IKernelLogger
     {
         void Debug(string message);

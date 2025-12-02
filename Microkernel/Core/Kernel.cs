@@ -1,13 +1,13 @@
 ﻿using System;
-using System.Collections. Generic;
+using System.Collections.Generic;
 using System.IO;
-using System. Linq;
-using System. Reflection;
-using System. Threading;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Contracts;
 using Microkernel.IPC;
-using Microkernel. Messaging;
+using Microkernel.Messaging;
 using Microkernel.Plugins;
 using Microkernel.Services;
 
@@ -22,7 +22,10 @@ namespace Microkernel.Core
         private readonly PluginProcessManager _processManager;
 
         private readonly List<PluginContext> _plugins = new List<PluginContext>();
-        private readonly ReaderWriterLockSlim _pluginsLock = new ReaderWriterLockSlim(LockRecursionPolicy. SupportsRecursion);
+
+        private readonly ReaderWriterLockSlim _pluginsLock =
+            new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion);
+
         private readonly object _stateLock = new object();
 
         private KernelState _state = KernelState.Created;
@@ -43,6 +46,26 @@ namespace Microkernel.Core
             _processManager = new PluginProcessManager(logger);
 
             _configuration. Validate();
+
+            // Wire up process manager events - Handle events published by external plugin processes
+            _processManager.OnPluginPublish += HandleExternalPluginEvent;
+        }
+
+        private void HandleExternalPluginEvent(EventMessage evt)
+        {
+            if (evt == null) return;
+
+            _logger.Debug("Received event from external plugin: " + evt.Topic);
+
+            // Publish to message bus (for subscriptions)
+            _messageBus.Publish(evt);
+
+            // Dispatch to in-process plugins
+            DispatchToPlugins(evt);
+
+            // Broadcast to other external processes (exclude the source to prevent loops)
+            string sourcePlugin = evt.Source ??  "";
+            _processManager.BroadcastEventExcept(evt, sourcePlugin + "Process");
         }
 
         public static Kernel CreateDefault()
@@ -86,10 +109,11 @@ namespace Microkernel.Core
         {
             lock (_stateLock)
             {
-                if (_state != KernelState. Created && _state != KernelState.Stopped)
+                if (_state != KernelState.Created && _state != KernelState.Stopped)
                 {
                     throw new InvalidOperationException("Cannot start kernel in state: " + _state);
                 }
+
                 _state = KernelState.Starting;
             }
 
@@ -114,24 +138,39 @@ namespace Microkernel.Core
         }
 
         /// <summary>
-        /// Launches plugins that run as separate OS processes (IPC via named pipes). 
+        /// Launches plugins that run as separate OS processes (IPC via named pipes).
         /// This satisfies the assignment requirement for process isolation.
         /// </summary>
         private void LaunchExternalPlugins()
         {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            
-            // Search for MetricsLogger executable in various locations
-            string[] searchPaths = new[]
+            _logger.Info("Looking for external plugin executables in: " + baseDir);
+
+            // Launch MetricsLogger
+            LaunchExternalPlugin("MetricsLoggerProcess", new[]
             {
                 Path.Combine(baseDir, "MetricsLogger.exe"),
-                Path. Combine(baseDir, "MetricsLogger"),
-                Path. Combine(baseDir, ". .", "Plugins", "MetricsLoggerProcess", "bin", "Debug", "net8.0", "MetricsLogger.exe"),
-                Path.Combine(baseDir, ". .", "Plugins", "MetricsLoggerProcess", "bin", "Release", "net8.0", "MetricsLogger.exe"),
-                Path. Combine(baseDir, "..", ". .", ". .", ". .", "Plugins", "MetricsLoggerProcess", "bin", "Debug", "net8.0", "MetricsLogger.exe"),
-                Path.Combine(baseDir, "..", "..", "..", ". .", "Plugins", "MetricsLoggerProcess", "bin", "Release", "net8.0", "MetricsLogger.exe"),
-            };
+                Path.Combine(baseDir, "MetricsLogger"),
+                Path.Combine(baseDir, ". .", "Plugins", "MetricsLoggerProcess", "bin", "Debug", "net8.0",
+                    "MetricsLogger.exe"),
+                Path.Combine(baseDir, "..", "Plugins", "MetricsLoggerProcess", "bin", "Release", "net8.0",
+                    "MetricsLogger.exe"),
+            });
 
+            // Launch EventGenerator
+            LaunchExternalPlugin("EventGeneratorProcess", new[]
+            {
+                Path.Combine(baseDir, "EventGenerator.exe"),
+                Path.Combine(baseDir, "EventGenerator"),
+                Path.Combine(baseDir, "..", "Plugins", "EventGeneratorPlugin", "bin", "Debug", "net8.0",
+                    "EventGenerator.exe"),
+                Path.Combine(baseDir, ". .", "Plugins", "EventGeneratorPlugin", "bin", "Release", "net8.0",
+                    "EventGenerator.exe"),
+            });
+        }
+
+        private void LaunchExternalPlugin(string pluginName, string[] searchPaths)
+        {
             foreach (var path in searchPaths)
             {
                 try
@@ -139,11 +178,12 @@ namespace Microkernel.Core
                     string fullPath = Path.GetFullPath(path);
                     if (File.Exists(fullPath))
                     {
-                        _logger.Info("Found external plugin executable: " + fullPath);
-                        if (_processManager. LaunchPlugin("MetricsLoggerProcess", fullPath))
+                        _logger.Info("Found external plugin: " + fullPath);
+                        if (_processManager.LaunchPlugin(pluginName, fullPath))
                         {
-                            _logger.Info("MetricsLogger launched as SEPARATE OS PROCESS (IPC via named pipes).");
+                            _logger.Info(pluginName + " launched as SEPARATE OS PROCESS (IPC via named pipes).");
                         }
+
                         return;
                     }
                 }
@@ -153,39 +193,43 @@ namespace Microkernel.Core
                 }
             }
 
-            _logger.Debug("MetricsLogger. exe not found - using in-process plugin instead.");
+            _logger.Debug(pluginName + " executable not found - will use in-process plugin if available.");
         }
 
         public void Stop()
         {
             lock (_stateLock)
             {
-                if (_state != KernelState. Running)
+                if (_state != KernelState.Running)
                 {
                     return;
                 }
-                _state = KernelState. Stopping;
+
+                _state = KernelState.Stopping;
             }
 
-            _logger. Info("Kernel stopping...");
+            _logger.Info("Kernel stopping...");
 
             try
             {
                 try
                 {
-                    _autoMetricsSubscription?. Dispose();
+                    _autoMetricsSubscription?.Dispose();
                     _autoMetricsSubscription = null;
-                    _autoSubscriptionPatterns. Clear();
+                    _autoSubscriptionPatterns.Clear();
                 }
-                catch { /* ignore */ }
+                catch
+                {
+                    /* ignore */
+                }
 
                 StopPlugins();
                 UnloadPlugins();
-                
+
                 // Stop external plugin processes
                 try
                 {
-                    _processManager?. Dispose();
+                    _processManager?.Dispose();
                 }
                 catch (Exception ex)
                 {
@@ -198,7 +242,7 @@ namespace Microkernel.Core
             catch (Exception ex)
             {
                 _logger.Error("Error during kernel shutdown: " + ex.Message);
-                State = KernelState. Faulted;
+                State = KernelState.Faulted;
             }
         }
 
@@ -214,14 +258,14 @@ namespace Microkernel.Core
                 return;
             }
 
-            if (message. Timestamp == default)
+            if (message.Timestamp == default)
             {
-                message.Timestamp = DateTime. UtcNow;
+                message.Timestamp = DateTime.UtcNow;
             }
 
-            _messageBus. Publish(message);
+            _messageBus.Publish(message);
             DispatchToPlugins(message);
-            
+
             // Broadcast to external plugin processes via IPC (named pipes)
             try
             {
@@ -229,7 +273,7 @@ namespace Microkernel.Core
             }
             catch (Exception ex)
             {
-                _logger. Error("Error broadcasting to external processes: " + ex. Message);
+                _logger.Error("Error broadcasting to external processes: " + ex.Message);
             }
         }
 
@@ -239,19 +283,19 @@ namespace Microkernel.Core
             try
             {
                 var result = new List<PluginInfo>();
-                
+
                 // In-process plugins
                 foreach (var p in _plugins)
                 {
                     result.Add(new PluginInfo
                     {
                         Name = p.Plugin.Name,
-                        Version = p.Plugin. Version != null ? p.Plugin.Version. ToString() : "1.0.0",
+                        Version = p.Plugin.Version != null ? p.Plugin.Version.ToString() : "1.0.0",
                         State = p.State.ToString(),
-                        LoadedAt = p. LoadedAt
+                        LoadedAt = p.LoadedAt
                     });
                 }
-                
+
                 // External process plugins (IPC via named pipes)
                 if (_processManager != null)
                 {
@@ -259,15 +303,15 @@ namespace Microkernel.Core
                     {
                         result.Add(new PluginInfo
                         {
-                            Name = status. PluginName + " (Process PID:" + status.ProcessId + ")",
+                            Name = status.PluginName + " (Process PID:" + status.ProcessId + ")",
                             Version = "1.0.0",
-                            State = status. State,
+                            State = status.State,
                             LoadedAt = status.StartedAt
                         });
                     }
                 }
-                
-                return result. AsReadOnly();
+
+                return result.AsReadOnly();
             }
             finally
             {
@@ -281,7 +325,7 @@ namespace Microkernel.Core
             try
             {
                 var context = _plugins.FirstOrDefault(p =>
-                    p. Plugin.Name. Equals(name, StringComparison. OrdinalIgnoreCase));
+                    p.Plugin.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
                 return context?.Plugin;
             }
             finally
@@ -290,26 +334,26 @@ namespace Microkernel.Core
             }
         }
 
-        void IPluginHost. Publish(EventMessage evt)
+        void IPluginHost.Publish(EventMessage evt)
         {
             Publish(evt);
         }
 
-        void IPluginHost. Log(string message)
+        void IPluginHost.Log(string message)
         {
             _logger.Info("[Plugin] " + message);
         }
 
         public IDisposable Subscribe(string topicPattern, Action<EventMessage> handler)
         {
-            return _messageBus. Subscribe(topicPattern, handler);
+            return _messageBus.Subscribe(topicPattern, handler);
         }
 
         public IReadOnlyList<string> GetAutoSubscriptions()
         {
             lock (_autoSubscriptionPatterns)
             {
-                return _autoSubscriptionPatterns. ToList(). AsReadOnly();
+                return _autoSubscriptionPatterns.ToList().AsReadOnly();
             }
         }
 
@@ -328,7 +372,7 @@ namespace Microkernel.Core
             try
             {
                 var context = _plugins.FirstOrDefault(p =>
-                    p. Plugin.Name. Equals(pluginName, StringComparison.OrdinalIgnoreCase));
+                    p.Plugin.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
                 if (context == null) return false;
 
                 try
@@ -364,22 +408,22 @@ namespace Microkernel.Core
         {
             if (string.IsNullOrWhiteSpace(pluginName)) return false;
 
-            _pluginsLock. EnterWriteLock();
+            _pluginsLock.EnterWriteLock();
             try
             {
-                var context = _plugins. FirstOrDefault(p =>
-                    p.Plugin.Name. Equals(pluginName, StringComparison.OrdinalIgnoreCase));
+                var context = _plugins.FirstOrDefault(p =>
+                    p.Plugin.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
                 if (context == null) return false;
 
-                if (context.State == PluginState. Faulted)
+                if (context.State == PluginState.Faulted)
                 {
-                    _logger. Warn("Plugin " + pluginName + " is already in Faulted state.");
+                    _logger.Warn("Plugin " + pluginName + " is already in Faulted state.");
                     return true;
                 }
 
                 _logger.Error("╔══════════════════════════════════════════════════════════╗");
-                _logger.Error("║  CRASH INITIATED: " + pluginName. PadRight(39) + "║");
-                _logger. Error("╚══════════════════════════════════════════════════════════╝");
+                _logger.Error("║  CRASH INITIATED: " + pluginName.PadRight(39) + "║");
+                _logger.Error("╚══════════════════════════════════════════════════════════╝");
 
                 // Step 1: Call Stop() to trigger normal shutdown
                 try
@@ -390,14 +434,14 @@ namespace Microkernel.Core
                 }
                 catch (Exception stopEx)
                 {
-                    _logger.Error("Phase 1: Exception during Stop(): " + stopEx. Message);
+                    _logger.Error("Phase 1: Exception during Stop(): " + stopEx.Message);
                 }
 
                 // Step 2: Use reflection to corrupt internal state
                 try
                 {
                     _logger.Info("Phase 2: Corrupting internal state via reflection...");
-                    CorruptPluginState(context. Plugin);
+                    CorruptPluginState(context.Plugin);
                     _logger.Info("Phase 2: State corruption completed.");
                 }
                 catch (Exception corruptEx)
@@ -411,7 +455,7 @@ namespace Microkernel.Core
 
                 _logger.Error("╔══════════════════════════════════════════════════════════╗");
                 _logger.Error("║  CRASH COMPLETE: " + pluginName.PadRight(40) + "║");
-                _logger. Error("║  Status: FAULTED - No longer receiving events            ║");
+                _logger.Error("║  Status: FAULTED - No longer receiving events            ║");
                 _logger.Error("╚══════════════════════════════════════════════════════════╝");
 
                 return true;
@@ -426,7 +470,7 @@ namespace Microkernel.Core
         private void CorruptPluginState(IPlugin plugin)
         {
             Type pluginType = plugin.GetType();
-            BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags. Public;
+            BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
 
             FieldInfo[] allFields = pluginType.GetFields(flags);
             int corruptedCount = 0;
@@ -435,7 +479,7 @@ namespace Microkernel.Core
             {
                 try
                 {
-                    Type fieldType = field. FieldType;
+                    Type fieldType = field.FieldType;
                     object currentValue = field.GetValue(plugin);
 
                     if (currentValue == null) continue;
@@ -444,23 +488,39 @@ namespace Microkernel.Core
                     if (fieldType == typeof(CancellationTokenSource))
                     {
                         var cts = currentValue as CancellationTokenSource;
-                        if (cts != null && ! cts.IsCancellationRequested)
+                        if (cts != null && !cts.IsCancellationRequested)
                         {
                             _logger.Info("  → Cancelling: " + field.Name);
-                            try { cts.Cancel(); corruptedCount++; } catch { }
+                            try
+                            {
+                                cts.Cancel();
+                                corruptedCount++;
+                            }
+                            catch
+                            {
+                            }
                         }
+
                         continue;
                     }
 
                     // Wait for Tasks
-                    if (typeof(Task). IsAssignableFrom(fieldType))
+                    if (typeof(Task).IsAssignableFrom(fieldType))
                     {
                         var task = currentValue as Task;
                         if (task != null && !task.IsCompleted)
                         {
-                            _logger.Info("  → Awaiting task: " + field. Name);
-                            try { task.Wait(2000); corruptedCount++; } catch { }
+                            _logger.Info("  → Awaiting task: " + field.Name);
+                            try
+                            {
+                                task.Wait(2000);
+                                corruptedCount++;
+                            }
+                            catch
+                            {
+                            }
                         }
+
                         continue;
                     }
 
@@ -468,7 +528,15 @@ namespace Microkernel.Core
                     if (typeof(IDisposable).IsAssignableFrom(fieldType) && fieldType != typeof(CancellationTokenSource))
                     {
                         _logger.Info("  → Disposing: " + field.Name);
-                        try { ((IDisposable)currentValue).Dispose(); corruptedCount++; } catch { }
+                        try
+                        {
+                            ((IDisposable)currentValue).Dispose();
+                            corruptedCount++;
+                        }
+                        catch
+                        {
+                        }
+
                         continue;
                     }
 
@@ -483,20 +551,21 @@ namespace Microkernel.Core
                             field.SetValue(plugin, false);
                             corruptedCount++;
                         }
+
                         continue;
                     }
 
                     // Null out host references
-                    if (fieldType == typeof(IPluginHost) || fieldType. Name.Contains("Host"))
+                    if (fieldType == typeof(IPluginHost) || fieldType.Name.Contains("Host"))
                     {
-                        _logger. Info("  → Nulling host: " + field.Name);
+                        _logger.Info("  → Nulling host: " + field.Name);
                         field.SetValue(plugin, null);
                         corruptedCount++;
                         continue;
                     }
 
                     // Null out other important-looking references
-                    if (! fieldType.IsValueType && fieldType != typeof(string))
+                    if (!fieldType.IsValueType && fieldType != typeof(string))
                     {
                         string nameLower = field.Name.ToLowerInvariant();
                         if (nameLower.Contains("random") || nameLower.Contains("timer") ||
@@ -523,18 +592,18 @@ namespace Microkernel.Core
         // Restart a faulted plugin
         public bool RestartPlugin(string pluginName)
         {
-            if (string. IsNullOrWhiteSpace(pluginName)) return false;
+            if (string.IsNullOrWhiteSpace(pluginName)) return false;
 
             _pluginsLock.EnterWriteLock();
             try
             {
                 var context = _plugins.FirstOrDefault(p =>
-                    p.Plugin.Name.Equals(pluginName, StringComparison. OrdinalIgnoreCase));
+                    p.Plugin.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
                 if (context == null) return false;
 
                 if (context.State == PluginState.Running)
                 {
-                    _logger. Warn("Plugin " + pluginName + " is already running.");
+                    _logger.Warn("Plugin " + pluginName + " is already running.");
                     return true;
                 }
 
@@ -542,21 +611,21 @@ namespace Microkernel.Core
 
                 try
                 {
-                    context. State = PluginState.Starting;
+                    context.State = PluginState.Starting;
 
-                    var timeoutMs = (int)_configuration. PluginStartTimeout.TotalMilliseconds;
+                    var timeoutMs = (int)_configuration.PluginStartTimeout.TotalMilliseconds;
                     using (var cts = new CancellationTokenSource(timeoutMs))
                     {
                         var startTask = Task.Run(() => context.Plugin.Start(this), cts.Token);
 
-                        if (! startTask.Wait(timeoutMs))
+                        if (!startTask.Wait(timeoutMs))
                         {
                             throw new TimeoutException("Plugin " + context.Plugin.Name + " restart timed out.");
                         }
 
                         if (startTask.Exception != null)
                         {
-                            throw startTask.Exception. InnerException ??  startTask.Exception;
+                            throw startTask.Exception.InnerException ?? startTask.Exception;
                         }
                     }
 
@@ -586,7 +655,7 @@ namespace Microkernel.Core
                 : SearchOption.TopDirectoryOnly;
 
             var loadedPlugins = _pluginLoader.LoadPlugins(
-                _configuration. PluginsDirectory,
+                _configuration.PluginsDirectory,
                 _configuration.PluginSearchPattern,
                 searchOption);
 
@@ -596,8 +665,8 @@ namespace Microkernel.Core
                 foreach (var plugin in loadedPlugins)
                 {
                     var context = new PluginContext(plugin);
-                    _plugins. Add(context);
-                    _logger. Info("Loaded plugin: " + plugin. Name + " v" + plugin.Version);
+                    _plugins.Add(context);
+                    _logger.Info("Loaded plugin: " + plugin.Name + " v" + plugin.Version);
                 }
             }
             finally
@@ -630,26 +699,26 @@ namespace Microkernel.Core
                     {
                         var startTask = Task.Run(() => context.Plugin.Start(this), cts.Token);
 
-                        if (! startTask.Wait(timeoutMs))
+                        if (!startTask.Wait(timeoutMs))
                         {
                             throw new TimeoutException("Plugin " + context.Plugin.Name + " start timed out.");
                         }
 
                         if (startTask.Exception != null)
                         {
-                            throw startTask.Exception.InnerException ??  startTask.Exception;
+                            throw startTask.Exception.InnerException ?? startTask.Exception;
                         }
                     }
 
-                    context.State = PluginState. Running;
+                    context.State = PluginState.Running;
                 }
                 catch (Exception ex)
                 {
-                    context. State = PluginState.Faulted;
+                    context.State = PluginState.Faulted;
                     context.LastError = ex.Message;
-                    _logger. Error("Failed to start plugin " + context. Plugin.Name + ": " + ex. Message);
+                    _logger.Error("Failed to start plugin " + context.Plugin.Name + ": " + ex.Message);
 
-                    if (! _configuration.ContinueOnPluginError)
+                    if (!_configuration.ContinueOnPluginError)
                     {
                         throw;
                     }
@@ -663,25 +732,25 @@ namespace Microkernel.Core
             List<PluginContext> pluginsToStop;
             try
             {
-                pluginsToStop = _plugins.Where(p => p. State == PluginState.Running).ToList();
+                pluginsToStop = _plugins.Where(p => p.State == PluginState.Running).ToList();
             }
             finally
             {
                 _pluginsLock.ExitReadLock();
             }
 
-            pluginsToStop. Reverse();
+            pluginsToStop.Reverse();
 
             foreach (var context in pluginsToStop)
             {
                 try
                 {
-                    context.State = PluginState. Stopping;
+                    context.State = PluginState.Stopping;
 
                     var timeoutMs = (int)_configuration.PluginStopTimeout.TotalMilliseconds;
                     using (var cts = new CancellationTokenSource(timeoutMs))
                     {
-                        var stopTask = Task.Run(() => context.Plugin. Stop(), cts. Token);
+                        var stopTask = Task.Run(() => context.Plugin.Stop(), cts.Token);
                         stopTask.Wait(timeoutMs);
                     }
 
@@ -689,9 +758,9 @@ namespace Microkernel.Core
                 }
                 catch (Exception ex)
                 {
-                    context. State = PluginState.Faulted;
+                    context.State = PluginState.Faulted;
                     context.LastError = ex.Message;
-                    _logger. Error("Error stopping plugin " + context.Plugin.Name + ": " + ex.Message);
+                    _logger.Error("Error stopping plugin " + context.Plugin.Name + ": " + ex.Message);
                 }
             }
         }
@@ -705,18 +774,18 @@ namespace Microkernel.Core
             }
             finally
             {
-                _pluginsLock. ExitWriteLock();
+                _pluginsLock.ExitWriteLock();
             }
         }
 
         private void DispatchToPlugins(EventMessage message)
         {
-            _pluginsLock. EnterReadLock();
+            _pluginsLock.EnterReadLock();
             List<PluginContext> activePlugins;
             try
             {
                 // Only dispatch to Running plugins - Faulted plugins don't receive events
-                activePlugins = _plugins.Where(p => p.State == PluginState. Running).ToList();
+                activePlugins = _plugins.Where(p => p.State == PluginState.Running).ToList();
             }
             finally
             {
@@ -734,7 +803,7 @@ namespace Microkernel.Core
                     // When a plugin throws an exception during HandleEvent, mark it as Faulted
                     _logger.Error("Plugin " + context.Plugin.Name + " crashed during HandleEvent: " + ex.Message);
 
-                    _pluginsLock. EnterWriteLock();
+                    _pluginsLock.EnterWriteLock();
                     try
                     {
                         context.State = PluginState.Faulted;
@@ -745,7 +814,8 @@ namespace Microkernel.Core
                         _pluginsLock.ExitWriteLock();
                     }
 
-                    _logger.Error("Plugin " + context.Plugin.Name + " is now in Faulted state and will not receive further events.");
+                    _logger.Error("Plugin " + context.Plugin.Name +
+                                  " is now in Faulted state and will not receive further events.");
                 }
             }
         }
@@ -755,7 +825,8 @@ namespace Microkernel.Core
             _pluginsLock.EnterReadLock();
             try
             {
-                bool hasMetricsLogger = _plugins.Any(p => p.Plugin.Name. Equals("MetricsLogger", StringComparison.OrdinalIgnoreCase));
+                bool hasMetricsLogger = _plugins.Any(p =>
+                    p.Plugin.Name.Equals("MetricsLogger", StringComparison.OrdinalIgnoreCase));
                 if (!hasMetricsLogger)
                 {
                     return;
@@ -763,21 +834,22 @@ namespace Microkernel.Core
             }
             finally
             {
-                _pluginsLock. ExitReadLock();
+                _pluginsLock.ExitReadLock();
             }
 
             try
             {
                 if (_autoMetricsSubscription != null) return;
 
-                _autoMetricsSubscription = _messageBus.Subscribe("metrics.*", (evt) =>
-                {
-                    _logger.Info("[subscription metrics.*] " + (evt?. Topic ?? "") + ": " + (evt?.Payload ?? ""));
-                });
+                _autoMetricsSubscription = _messageBus.Subscribe("metrics.*",
+                    (evt) =>
+                    {
+                        _logger.Info("[subscription metrics.*] " + (evt?.Topic ?? "") + ": " + (evt?.Payload ?? ""));
+                    });
 
                 lock (_autoSubscriptionPatterns)
                 {
-                    if (! _autoSubscriptionPatterns.Contains("metrics.*"))
+                    if (!_autoSubscriptionPatterns.Contains("metrics.*"))
                     {
                         _autoSubscriptionPatterns.Add("metrics.*");
                     }
@@ -794,7 +866,7 @@ namespace Microkernel.Core
         /// </summary>
         public IReadOnlyList<PluginProcessStatus> GetExternalPluginStatus()
         {
-            return _processManager?. GetStatus() ??  new List<PluginProcessStatus>();
+            return _processManager?.GetStatus() ?? new List<PluginProcessStatus>();
         }
 
         private bool _disposed;
@@ -812,9 +884,11 @@ namespace Microkernel.Core
             {
                 _processManager?.Dispose();
             }
-            catch { }
+            catch
+            {
+            }
 
-            _pluginsLock. Dispose();
+            _pluginsLock.Dispose();
             _disposed = true;
         }
     }

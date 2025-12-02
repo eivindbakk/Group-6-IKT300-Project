@@ -2,118 +2,85 @@
 
 namespace Microkernel.Services
 {
-    public sealed class ConsoleKernelLogger : IKernelLogger
+    public enum LogLevel
     {
-        private readonly object _lock = new object();
-        private static string _currentInput = "";
-        private static int _cursorPos = 0;
-        private static bool _isPromptActive = false;
+        Debug = 0,
+        Info = 1,
+        Warn = 2,
+        Error = 3
+    }
 
-        // New: mute flag - if true, plugin logs and forwarded subscriptions are suppressed
-        private static bool _isMuted = false;
-
-        public static void SetPromptState(bool active, string currentInput = "", int cursorPos = 0)
-        {
-            _isPromptActive = active;
-            _currentInput = currentInput;
-            _cursorPos = cursorPos;
-        }
-
-        public static void UpdateCurrentInput(string input, int cursorPos)
-        {
-            _currentInput = input;
-            _cursorPos = cursorPos;
-        }
+    public class ConsoleKernelLogger : IKernelLogger
+    {
+        private static bool _muted = false;
+        private static LogLevel _minLevel = LogLevel. Info;  // Default: hide debug messages
+        private static readonly object _lock = new object();
 
         public static void SetMuted(bool muted)
         {
-            _isMuted = muted;
+            _muted = muted;
         }
 
-        public static bool IsMuted()
+        public static void SetMinLogLevel(LogLevel level)
         {
-            return _isMuted;
+            _minLevel = level;
+        }
+
+        public static void EnableDebug()
+        {
+            _minLevel = LogLevel. Debug;
+        }
+
+        public static void DisableDebug()
+        {
+            _minLevel = LogLevel.Info;
         }
 
         public void Debug(string message)
         {
-            if (_isMuted) return;
-            Log("DEBUG", message, ConsoleColor.Gray);
+            if (_minLevel <= LogLevel. Debug)
+            {
+                Log("DEBUG", message, ConsoleColor.DarkGray);
+            }
         }
 
         public void Info(string message)
         {
-            if (_isMuted) return;
-            Log("INFO ", message, ConsoleColor.White);
+            if (_minLevel <= LogLevel.Info)
+            {
+                Log("INFO ", message, ConsoleColor.White);
+            }
         }
 
         public void Warn(string message)
         {
-            if (_isMuted) return;
-            Log("WARN ", message, ConsoleColor.Yellow);
+            if (_minLevel <= LogLevel. Warn)
+            {
+                Log("WARN ", message, ConsoleColor.Yellow);
+            }
         }
 
         public void Error(string message)
         {
-            if (_isMuted) return;
-            Log("ERROR", message, ConsoleColor.Red);
+            if (_minLevel <= LogLevel.Error)
+            {
+                Log("ERROR", message, ConsoleColor.Red);
+            }
         }
 
         private void Log(string level, string message, ConsoleColor color)
         {
+            if (_muted) return;
+
             lock (_lock)
             {
-                bool wasPromptActive = _isPromptActive;
-                string savedInput = _currentInput;
-                int savedCursorPos = _cursorPos;
-
-                try
-                {
-                    if (wasPromptActive)
-                    {
-                        ClearCurrentLine();
-                    }
-
-                    string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.Write("[" + timestamp + "] ");
-
-                    Console.ForegroundColor = color;
-                    Console.Write("[" + level + "] ");
-
-                    Console.ResetColor();
-                    Console.WriteLine(message);
-
-                    if (wasPromptActive)
-                    {
-                        Console.Write("> " + savedInput);
-                        if (savedCursorPos < savedInput.Length)
-                        {
-                            int moveBack = savedInput.Length - savedCursorPos;
-                            Console.Write(new string('\b', moveBack));
-                        }
-                    }
-                }
-                catch
-                {
-                    // Ignore console errors
-                }
-            }
-        }
-
-        private void ClearCurrentLine()
-        {
-            try
-            {
-                int totalLength = 2 + _currentInput.Length;
-                Console.Write("\r");
-                Console.Write(new string(' ', totalLength));
-                Console.Write("\r");
-            }
-            catch
-            {
-                // Ignore errors
+                string timestamp = DateTime.Now. ToString("HH:mm:ss.fff");
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write("[" + timestamp + "] ");
+                Console. ForegroundColor = color;
+                Console.Write("[" + level + "] ");
+                Console.ResetColor();
+                Console.WriteLine(message);
             }
         }
     }

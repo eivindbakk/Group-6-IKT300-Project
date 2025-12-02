@@ -163,6 +163,23 @@ namespace Microkernel.Services
                     case "quit":
                     case "q":
                         return true;
+                    
+                    case "debug":
+                        if (parts.Length > 1 && parts[1]. Equals("on", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ConsoleKernelLogger.EnableDebug();
+                            Console.WriteLine("Debug output enabled.");
+                        }
+                        else if (parts.Length > 1 && parts[1].Equals("off", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ConsoleKernelLogger.DisableDebug();
+                            Console.WriteLine("Debug output disabled.");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Usage: debug on|off");
+                        }
+                        return false;
 
                     default:
                         Console.WriteLine("Unknown command: " + command + ". Type 'help' for commands.");
