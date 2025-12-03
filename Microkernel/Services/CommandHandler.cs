@@ -398,7 +398,7 @@ namespace Microkernel.Services
 
             var startEvt = new EventMessage
             {
-                Topic = "generator.start",
+                Topic = EventTopics.GeneratorStart,
                 Payload = "",
                 Timestamp = DateTime. UtcNow,
                 Source = "Console"
@@ -413,7 +413,7 @@ namespace Microkernel.Services
 
             var stopEvt = new EventMessage
             {
-                Topic = "generator.stop",
+                Topic = EventTopics.GeneratorStop,
                 Payload = "",
                 Timestamp = DateTime. UtcNow,
                 Source = "Console"
@@ -426,7 +426,7 @@ namespace Microkernel.Services
         {
             var intervalEvt = new EventMessage
             {
-                Topic = "generator.interval",
+                Topic = EventTopics.GeneratorInterval,
                 Payload = interval.ToString(),
                 Timestamp = DateTime.UtcNow,
                 Source = "Console"
@@ -449,7 +449,7 @@ namespace Microkernel.Services
 
             var evt = new EventMessage
             {
-                Topic = "UserLoggedInEvent",
+                Topic = EventTopics.UserLoggedIn,
                 Payload = JsonSerializer.Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
                 Timestamp = DateTime.UtcNow,
                 Source = "Console"
@@ -482,7 +482,7 @@ namespace Microkernel.Services
 
             var evt = new EventMessage
             {
-                Topic = "DataProcessedEvent",
+                Topic = EventTopics.DataProcessed,
                 Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
                 Timestamp = DateTime. UtcNow,
                 Source = "Console"
@@ -516,7 +516,7 @@ namespace Microkernel.Services
 
             var evt = new EventMessage
             {
-                Topic = "SystemMetricsEvent",
+                Topic = EventTopics.SystemMetrics,
                 Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
                 Timestamp = DateTime.UtcNow,
                 Source = "Console"

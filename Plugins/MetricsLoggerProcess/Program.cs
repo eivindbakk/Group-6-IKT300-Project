@@ -148,22 +148,82 @@ namespace MetricsLoggerProcess
                 case IpcMessageType.Start:
                     Console.WriteLine("[MetricsLogger] Received START command.");
                     LogToFile("MetricsLogger received START");
+                    SendAck("Started");
                     break;
 
                 case IpcMessageType.Stop:
                     Console.WriteLine("[MetricsLogger] Received STOP command.");
+                    SendAck("Stopping");
                     break;
 
                 case IpcMessageType. Shutdown:
                     Console.WriteLine("[MetricsLogger] Received SHUTDOWN command.");
+                    SendAck("Shutting down");
+                    PerformGracefulShutdown();
                     _running = false;
                     break;
 
-                case IpcMessageType.Event:
-                    Console.WriteLine("[MetricsLogger] Received EVENT: " + (message. Event?. Topic ?? "null"));
+                case IpcMessageType. Event:
+                    Console.WriteLine("[MetricsLogger] Received EVENT: " + (message.Event?.Topic ?? "null"));
                     HandleEvent(message.Event);
                     break;
             }
+        }
+        
+        private static void SendAck(string response)
+        {
+            try
+            {
+                if (_pipeClient != null && _pipeClient. IsConnected)
+                {
+                    IpcProtocol. WriteMessage(_pipeClient, new IpcMessage
+                    {
+                        Type = IpcMessageType. Ack,
+                        PluginName = "MetricsLoggerProcess",
+                        Response = response
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MetricsLogger] Failed to send ACK: " + ex.Message);
+            }
+        }
+        
+        private static void SendError(string errorMessage, int errorCode = 0)
+        {
+            try
+            {
+                if (_pipeClient != null && _pipeClient. IsConnected)
+                {
+                    IpcProtocol. WriteMessage(_pipeClient, IpcMessage.CreateError(
+                        "MetricsLoggerProcess",
+                        errorMessage,
+                        errorCode
+                    ));
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MetricsLogger] Failed to send error: " + ex.Message);
+            }
+        }
+
+        private static void PerformGracefulShutdown()
+        {
+            Console.WriteLine("[MetricsLogger] Performing graceful shutdown...");
+
+            // Log final statistics
+            LogToFile("========================================");
+            LogToFile("MetricsLogger Shutdown: " + DateTime.Now. ToString("yyyy-MM-dd HH:mm:ss"));
+            LogToFile("Session Statistics:");
+            LogToFile("  Total events received: " + _totalEventsReceived);
+            LogToFile("  User logins logged: " + _userLoginCount);
+            LogToFile("  Data processed logged: " + _dataProcessedCount);
+            LogToFile("  System metrics logged: " + _systemMetricsCount);
+            LogToFile("========================================");
+
+            Console.WriteLine("[MetricsLogger] Graceful shutdown complete.");
         }
 
         private static void HandleEvent(EventMessage evt)
@@ -172,19 +232,20 @@ namespace MetricsLoggerProcess
 
             _totalEventsReceived++;
             string topic = evt.Topic ??  "";
-            string payload = evt.Payload ?? "";
+            string payload = evt. Payload ?? "";
 
             Console.WriteLine("[MetricsLogger] RECEIVED: " + topic);
 
-            if (topic. Equals("UserLoggedInEvent", StringComparison. OrdinalIgnoreCase))
+            // Use constants for comparison
+            if (topic. Equals(EventTopics.UserLoggedIn, StringComparison.OrdinalIgnoreCase))
             {
                 HandleUserLoggedInEvent(payload);
             }
-            else if (topic.Equals("DataProcessedEvent", StringComparison.OrdinalIgnoreCase))
+            else if (topic. Equals(EventTopics.DataProcessed, StringComparison. OrdinalIgnoreCase))
             {
                 HandleDataProcessedEvent(payload);
             }
-            else if (topic. Equals("SystemMetricsEvent", StringComparison.OrdinalIgnoreCase))
+            else if (topic. Equals(EventTopics.SystemMetrics, StringComparison.OrdinalIgnoreCase))
             {
                 HandleSystemMetricsEvent(payload);
             }
@@ -199,7 +260,7 @@ namespace MetricsLoggerProcess
             _userLoginCount++;
             try
             {
-                var data = JsonSerializer. Deserialize<JsonElement>(payload);
+                var data = JsonSerializer.Deserialize<JsonElement>(payload);
                 string user = data.TryGetProperty("username", out var u) ? u.GetString() : "unknown";
                 string userId = data.TryGetProperty("userId", out var id) ? id.GetString() : "";
                 string ip = data.TryGetProperty("ipAddress", out var ipProp) ? ipProp.GetString() : "";
@@ -208,10 +269,16 @@ namespace MetricsLoggerProcess
                 Console.WriteLine("[MetricsLogger] " + logLine);
                 LogToFile(logLine);
             }
+            catch (JsonException ex)
+            {
+                Console. WriteLine("[MetricsLogger] Error parsing UserLoggedInEvent: " + ex.Message);
+                LogToFile("USER_LOGIN | ERROR: Failed to parse payload");
+                SendError("Failed to parse UserLoggedInEvent: " + ex.Message, 101);
+            }
             catch (Exception ex)
             {
-                Console. WriteLine("[MetricsLogger] Error parsing UserLoggedInEvent: " + ex. Message);
-                LogToFile("USER_LOGIN | Raw: " + payload);
+                Console.WriteLine("[MetricsLogger] Error handling UserLoggedInEvent: " + ex.Message);
+                SendError("Error handling UserLoggedInEvent: " + ex.Message, 100);
             }
         }
 
@@ -226,7 +293,8 @@ namespace MetricsLoggerProcess
                 string status = data.TryGetProperty("success", out var success) && success.GetBoolean() ? "SUCCESS" : "FAILED";
                 double time = data.TryGetProperty("processingTimeMs", out var t) ? t.GetDouble() : 0;
 
-                string logLine = "DATA_PROCESSED | Source: " + source + " | Records: " + records + " | Status: " + status + " | Time: " + time. ToString("F2") + "ms";
+                string logLine = "DATA_PROCESSED | Source: " + source + " | Records: " + records + 
+                                 " | Status: " + status + " | Time: " + time. ToString("F2") + "ms";
 
                 if (status == "FAILED" && data.TryGetProperty("errorMessage", out var err))
                 {
@@ -236,10 +304,16 @@ namespace MetricsLoggerProcess
                 Console. WriteLine("[MetricsLogger] " + logLine);
                 LogToFile(logLine);
             }
-            catch (Exception ex)
+            catch (JsonException ex)
             {
                 Console.WriteLine("[MetricsLogger] Error parsing DataProcessedEvent: " + ex.Message);
-                LogToFile("DATA_PROCESSED | Raw: " + payload);
+                LogToFile("DATA_PROCESSED | ERROR: Failed to parse payload");
+                SendError("Failed to parse DataProcessedEvent: " + ex.Message, 102);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MetricsLogger] Error handling DataProcessedEvent: " + ex.Message);
+                SendError("Error handling DataProcessedEvent: " + ex.Message, 100);
             }
         }
 
@@ -248,20 +322,29 @@ namespace MetricsLoggerProcess
             _systemMetricsCount++;
             try
             {
-                var data = JsonSerializer.Deserialize<JsonElement>(payload);
+                var data = JsonSerializer. Deserialize<JsonElement>(payload);
                 string machine = data.TryGetProperty("machineName", out var m) ? m.GetString() : Environment.MachineName;
                 double cpu = data.TryGetProperty("cpuUsagePercent", out var c) ? c. GetDouble() : 0;
                 double ram = data.TryGetProperty("memoryUsagePercent", out var r) ? r.GetDouble() : 0;
-                double disk = data.TryGetProperty("diskUsagePercent", out var d) ? d. GetDouble() : 0;
+                double disk = data.TryGetProperty("diskUsagePercent", out var d) ? d.GetDouble() : 0;
 
-                string logLine = "SYSTEM_METRICS | Machine: " + machine + " | CPU: " + cpu.ToString("F1") + "% | RAM: " + ram.ToString("F1") + "% | Disk: " + disk.ToString("F1") + "%";
+                string logLine = "SYSTEM_METRICS | Machine: " + machine + 
+                                 " | CPU: " + cpu.ToString("F1") + "%" + 
+                                 " | RAM: " + ram.ToString("F1") + "%" + 
+                                 " | Disk: " + disk.ToString("F1") + "%";
                 Console.WriteLine("[MetricsLogger] " + logLine);
                 LogToFile(logLine);
             }
+            catch (JsonException ex)
+            {
+                Console. WriteLine("[MetricsLogger] Error parsing SystemMetricsEvent: " + ex.Message);
+                LogToFile("SYSTEM_METRICS | ERROR: Failed to parse payload");
+                SendError("Failed to parse SystemMetricsEvent: " + ex.Message, 103);
+            }
             catch (Exception ex)
             {
-                Console.WriteLine("[MetricsLogger] Error parsing SystemMetricsEvent: " + ex. Message);
-                LogToFile("SYSTEM_METRICS | Raw: " + payload);
+                Console. WriteLine("[MetricsLogger] Error handling SystemMetricsEvent: " + ex.Message);
+                SendError("Error handling SystemMetricsEvent: " + ex.Message, 100);
             }
         }
 
@@ -275,20 +358,26 @@ namespace MetricsLoggerProcess
 
             try
             {
-                string timestamp = DateTime.Now. ToString("yyyy-MM-dd HH:mm:ss.fff");
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
                 string line = "[" + timestamp + "] " + message;
-        
+
                 using (StreamWriter sw = new StreamWriter(_logFilePath, true))
                 {
                     sw.WriteLine(line);
                     sw.Flush();
                 }
-        
+
                 Console.WriteLine("[MetricsLogger] LOGGED TO FILE: " + message);
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine("[MetricsLogger] ERROR writing to log: " + ex.Message);
+                SendError("Failed to write to log file: " + ex. Message, 200);
             }
             catch (Exception ex)
             {
                 Console.WriteLine("[MetricsLogger] ERROR writing to log: " + ex.Message);
+                SendError("Log file error: " + ex.Message, 201);
             }
         }
     }

@@ -149,36 +149,35 @@ namespace EventGeneratorPlugin
         {
             if (evt == null) return;
 
-            string topic = (evt.Topic ??  ""). ToLowerInvariant(). Trim();
-            string payload = (evt.Payload ??  ""). Trim();
+            string topic = (evt.Topic ?? "").ToLowerInvariant(). Trim();
+            string payload = (evt. Payload ?? ""). Trim();
 
             Console.WriteLine("[EventGenerator] Received: " + topic);
 
-            switch (topic)
+            // Use constants (compare lowercase since we lowered the topic)
+            if (topic == EventTopics.GeneratorStart.ToLowerInvariant() ||
+                topic == "eventgenerator.start")
             {
-                case "eventgenerator.start":
-                case "generator.start":
-                    StartGenerating();
-                    break;
-
-                case "eventgenerator.stop":
-                case "generator.stop":
-                    StopGenerating();
-                    break;
-
-                case "eventgenerator.now":
-                case "generator.now":
-                    GenerateSystemMetricsEvent();
-                    break;
-
-                case "eventgenerator.interval":
-                case "generator.interval":
-                    if (int.TryParse(payload, out int interval) && interval >= 100)
-                    {
-                        _intervalMs = interval;
-                        Console.WriteLine("[EventGenerator] Interval: " + interval + "ms");
-                    }
-                    break;
+                StartGenerating();
+            }
+            else if (topic == EventTopics.GeneratorStop.ToLowerInvariant() ||
+                     topic == "eventgenerator.stop")
+            {
+                StopGenerating();
+            }
+            else if (topic == EventTopics.GeneratorNow.ToLowerInvariant() ||
+                     topic == "eventgenerator. now")
+            {
+                GenerateSystemMetricsEvent();
+            }
+            else if (topic == EventTopics.GeneratorInterval.ToLowerInvariant() ||
+                     topic == "eventgenerator.interval")
+            {
+                if (int.TryParse(payload, out int interval) && interval >= 100)
+                {
+                    _intervalMs = interval;
+                    Console.WriteLine("[EventGenerator] Interval: " + interval + "ms");
+                }
             }
         }
 
@@ -258,7 +257,7 @@ namespace EventGeneratorPlugin
 
             var eventMessage = new EventMessage
             {
-                Topic = "UserLoggedInEvent",
+                Topic = EventTopics.UserLoggedIn,
                 Payload = JsonSerializer. Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
                 Timestamp = DateTime. UtcNow,
                 Source = "EventGenerator"
@@ -285,7 +284,7 @@ namespace EventGeneratorPlugin
 
             var eventMessage = new EventMessage
             {
-                Topic = "DataProcessedEvent",
+                Topic = EventTopics. DataProcessed,
                 Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
                 Timestamp = DateTime. UtcNow,
                 Source = "EventGenerator"
@@ -312,7 +311,7 @@ namespace EventGeneratorPlugin
 
             var eventMessage = new EventMessage
             {
-                Topic = "SystemMetricsEvent",
+                Topic = EventTopics.SystemMetrics,
                 Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy. CamelCase }),
                 Timestamp = DateTime.UtcNow,
                 Source = "EventGenerator"
@@ -423,29 +422,29 @@ namespace EventGeneratorPlugin
         {
             if (cpu > 90)
             {
-                PublishAlert("alert. critical", "CPU critical: " + cpu.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertCritical, "CPU critical: " + cpu.ToString("F1") + "%");
             }
             else if (cpu > 75)
             {
-                PublishAlert("alert.warning", "CPU high: " + cpu. ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertWarning, "CPU high: " + cpu. ToString("F1") + "%");
             }
 
             if (memory > 90)
             {
-                PublishAlert("alert.critical", "Memory critical: " + memory.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertCritical, "Memory critical: " + memory.ToString("F1") + "%");
             }
             else if (memory > 80)
             {
-                PublishAlert("alert.warning", "Memory high: " + memory.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertWarning, "Memory high: " + memory.ToString("F1") + "%");
             }
 
             if (disk > 90)
             {
-                PublishAlert("alert.critical", "Disk I/O critical: " + disk.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertCritical, "Disk I/O critical: " + disk.ToString("F1") + "%");
             }
             else if (disk > 70)
             {
-                PublishAlert("alert.warning", "Disk I/O high: " + disk.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertWarning, "Disk I/O high: " + disk.ToString("F1") + "%");
             }
         }
 

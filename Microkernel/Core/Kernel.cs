@@ -1,12 +1,12 @@
 ﻿using System;
-using System. Collections.Generic;
-using System. IO;
+using System.Collections.Generic;
+using System.IO;
 using Contracts;
 using Microkernel.IPC;
-using Microkernel. Messaging;
+using Microkernel.Messaging;
 using Microkernel.Services;
 
-namespace Microkernel. Core
+namespace Microkernel.Core
 {
     /// <summary>
     /// The Microkernel core - responsible ONLY for:
@@ -26,12 +26,11 @@ namespace Microkernel. Core
 
         private KernelState _state = KernelState.Created;
         private bool _disposed;
-        
-        
-        
+
+
         public Kernel(KernelConfiguration configuration, IMessageBus messageBus, IKernelLogger logger)
         {
-            _configuration = configuration ??  throw new ArgumentNullException(nameof(configuration));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _messageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _processManager = new PluginProcessManager(logger);
@@ -43,14 +42,14 @@ namespace Microkernel. Core
         {
             return CreateDefault(KernelConfiguration.CreateDefault());
         }
-        
+
         private void HandlePluginPublish(EventMessage evt)
         {
             if (evt == null) return;
 
-            _logger. Debug("Plugin published: " + evt.Topic);
+            _logger.Debug("Plugin published: " + evt.Topic);
 
-            _processManager.BroadcastEventExcept(evt, evt.Source ??  "");
+            _processManager.BroadcastEventExcept(evt, evt.Source ?? "");
 
             _messageBus.Publish(evt);
         }
@@ -65,8 +64,20 @@ namespace Microkernel. Core
 
         public KernelState State
         {
-            get { lock (_stateLock) { return _state; } }
-            private set { lock (_stateLock) { _state = value; } }
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _state;
+                }
+            }
+            private set
+            {
+                lock (_stateLock)
+                {
+                    _state = value;
+                }
+            }
         }
 
         public void Start()
@@ -77,6 +88,7 @@ namespace Microkernel. Core
                 {
                     throw new InvalidOperationException("Cannot start kernel in state: " + _state);
                 }
+
                 _state = KernelState.Starting;
             }
 
@@ -93,7 +105,7 @@ namespace Microkernel. Core
             catch (Exception ex)
             {
                 _logger.Error("Kernel failed to start: " + ex.Message);
-                State = KernelState. Faulted;
+                State = KernelState.Faulted;
                 throw;
             }
         }
@@ -104,10 +116,10 @@ namespace Microkernel. Core
             {
                 if (_state != KernelState.Running)
                     return;
-                _state = KernelState. Stopping;
+                _state = KernelState.Stopping;
             }
 
-            _logger. Info("Kernel stopping...");
+            _logger.Info("Kernel stopping...");
 
             try
             {
@@ -130,11 +142,11 @@ namespace Microkernel. Core
             if (State != KernelState.Running)
                 return;
 
-            if (message. Timestamp == default)
-                message. Timestamp = DateTime. UtcNow;
+            if (message.Timestamp == default)
+                message.Timestamp = DateTime.UtcNow;
 
             // Publish to internal message bus
-            _messageBus. Publish(message);
+            _messageBus.Publish(message);
 
             // Broadcast to all external plugin processes via IPC
             _processManager.BroadcastEvent(message);
@@ -144,19 +156,19 @@ namespace Microkernel. Core
         {
             var result = new List<PluginInfo>();
 
-            foreach (var status in _processManager. GetStatus())
+            foreach (var status in _processManager.GetStatus())
             {
-                result. Add(new PluginInfo
+                result.Add(new PluginInfo
                 {
                     Name = status.PluginName,
                     Version = "1.0.0",
                     State = status.State,
-                    LoadedAt = status. StartedAt,
+                    LoadedAt = status.StartedAt,
                     ProcessId = status.ProcessId
                 });
             }
 
-            return result. AsReadOnly();
+            return result.AsReadOnly();
         }
 
         public (int total, int running, int faulted) GetPluginCounts()
@@ -173,7 +185,7 @@ namespace Microkernel. Core
         {
             return _processManager.RestartPlugin(pluginName);
         }
-        
+
         /// <summary>
         /// Dynamically loads a plugin process at runtime. 
         /// </summary>
@@ -198,31 +210,82 @@ namespace Microkernel. Core
             return _messageBus.Subscribe(topicPattern, handler);
         }
 
+        /// <summary>
+        /// Discovers and launches all plugin executables in the same folder as the kernel. 
+        /// 
+        /// To add a new plugin:
+        /// 1.  Build the plugin project
+        /// 2. Copy the . exe, .dll, and .runtimeconfig.json to the kernel's output folder
+        /// 3. Restart the kernel
+        /// 
+        /// No kernel code changes required - plugins are discovered automatically.
+        /// </summary>
         private void LaunchPluginProcesses()
         {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            var plugins = new[]
+            _logger.Info("Discovering plugins in: " + baseDir);
+
+            // Executables that are NOT plugins
+            var excludedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                new { Name = "MetricsLoggerProcess", Executable = "MetricsLogger.exe" },
-                new { Name = "EventGeneratorProcess", Executable = "EventGenerator.exe" }
+                "Microkernel.exe",
+                "createdump.exe"
             };
 
-            foreach (var plugin in plugins)
-            {
-                string exePath = Path. Combine(baseDir, plugin.Executable);
+            int pluginsFound = 0;
+            int pluginsLaunched = 0;
 
-                if (File.Exists(exePath))
+            try
+            {
+                var exeFiles = Directory.GetFiles(baseDir, "*.exe");
+
+                foreach (var exePath in exeFiles)
                 {
-                    if (_processManager.LaunchPlugin(plugin.Name, exePath))
+                    string fileName = Path.GetFileName(exePath);
+
+                    // Skip non-plugin executables
+                    if (excludedFiles.Contains(fileName))
+                        continue;
+
+                    // A valid . NET plugin has a matching .dll file
+                    string dllPath = Path.ChangeExtension(exePath, ".dll");
+                    if (!File.Exists(dllPath))
+                        continue;
+
+                    pluginsFound++;
+
+                    // Derive plugin name: "MetricsLogger. exe" -> "MetricsLoggerProcess"
+                    string pluginName = Path.GetFileNameWithoutExtension(exePath) + "Process";
+
+                    _logger.Debug("Discovered plugin: " + pluginName + " (" + fileName + ")");
+
+                    if (_processManager.LaunchPlugin(pluginName, exePath))
                     {
-                        _logger.Info(plugin.Name + " launched as separate OS process.");
+                        pluginsLaunched++;
+                        _logger.Info(pluginName + " launched as separate OS process.");
                     }
+                    else
+                    {
+                        _logger.Warn("Failed to launch plugin: " + pluginName);
+                    }
+                }
+
+                if (pluginsFound == 0)
+                {
+                    _logger.Warn("No plugins found.  Place plugin . exe files in: " + baseDir);
                 }
                 else
                 {
-                    _logger. Warn("Plugin executable not found: " + exePath);
+                    _logger.Info("Plugins: " + pluginsLaunched + "/" + pluginsFound + " launched successfully.");
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Error discovering plugins: " + ex.Message);
+
+                if (!_configuration.ContinueOnPluginError)
+                    throw;
             }
         }
 
@@ -233,7 +296,7 @@ namespace Microkernel. Core
             if (State == KernelState.Running)
                 Stop();
 
-            _processManager?. Dispose();
+            _processManager?.Dispose();
             _disposed = true;
         }
     }

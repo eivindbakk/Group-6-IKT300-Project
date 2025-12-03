@@ -1,12 +1,12 @@
 ﻿using System;
-using System.Collections. Concurrent;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System. Diagnostics;
+using System.Diagnostics;
 using System.IO;
-using System. IO.Pipes;
+using System.IO.Pipes;
 using System.Linq;
-using System. Text. Json;
-using System. Threading;
+using System.Text.Json;
+using System.Threading;
 using Contracts;
 using Contracts.IPC;
 using Microkernel.Services;
@@ -25,9 +25,9 @@ namespace Microkernel.IPC
 
         public PluginProcessManager(IKernelLogger logger)
         {
-            _logger = logger ??  throw new ArgumentNullException(nameof(logger));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _processes = new ConcurrentDictionary<string, PluginProcessInfo>(StringComparer.OrdinalIgnoreCase);
-            _pluginStates = new ConcurrentDictionary<string, string>(StringComparer. OrdinalIgnoreCase);
+            _pluginStates = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _cts = new CancellationTokenSource();
         }
 
@@ -46,7 +46,7 @@ namespace Microkernel.IPC
             if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(executablePath))
                 return false;
 
-            if (! File.Exists(executablePath))
+            if (!File.Exists(executablePath))
             {
                 _logger.Error("Plugin executable not found: " + executablePath);
                 return false;
@@ -54,15 +54,20 @@ namespace Microkernel.IPC
 
             if (_processes.ContainsKey(pluginName))
             {
-                _logger. Warn("Plugin '" + pluginName + "' is already running.");
+                _logger.Warn("Plugin '" + pluginName + "' is already running.");
                 return false;
             }
 
+            // Declare resources outside try block for cleanup in catch
+            NamedPipeServerStream pipeServer = null;
+            Process process = null;
+            string pipeName = null;
+
             try
             {
-                string pipeName = "microkernel_" + pluginName + "_" + Guid.NewGuid(). ToString("N");
+                pipeName = "microkernel_" + pluginName + "_" + Guid.NewGuid().ToString("N");
 
-                var pipeServer = new NamedPipeServerStream(
+                pipeServer = new NamedPipeServerStream(
                     pipeName,
                     PipeDirection.InOut,
                     1,
@@ -79,12 +84,10 @@ namespace Microkernel.IPC
                     CreateNoWindow = true
                 };
 
-                var process = Process.Start(processStartInfo);
+                process = Process.Start(processStartInfo);
                 if (process == null)
                 {
-                    pipeServer. Dispose();
-                    _logger.Error("Failed to start plugin process: " + pluginName);
-                    return false;
+                    throw new InvalidOperationException("Process. Start returned null for: " + executablePath);
                 }
 
                 var info = new PluginProcessInfo
@@ -94,24 +97,78 @@ namespace Microkernel.IPC
                     Process = process,
                     PipeServer = pipeServer,
                     PipeName = pipeName,
-                    StartedAt = DateTime. UtcNow
+                    StartedAt = DateTime.UtcNow
                 };
 
                 _processes[pluginName] = info;
                 SetPluginState(pluginName, "Starting");
 
-                new Thread(() => ConnectionHandler(info)) { IsBackground = true }. Start();
-                new Thread(() => ProcessMonitor(info)) { IsBackground = true }. Start();
+                // Start background threads for this plugin
+                new Thread(() => ConnectionHandler(info)) { IsBackground = true }.Start();
+                new Thread(() => ProcessMonitor(info)) { IsBackground = true }.Start();
                 new Thread(() => ConsumeStream(process.StandardOutput, pluginName)) { IsBackground = true }.Start();
-                new Thread(() => ConsumeStream(process. StandardError, pluginName)) { IsBackground = true }.Start();
+                new Thread(() => ConsumeStream(process.StandardError, pluginName)) { IsBackground = true }.Start();
 
                 _logger.Info("Launched plugin process: " + pluginName + " (PID: " + process.Id + ")");
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.Error("Error launching plugin '" + pluginName + "': " + ex. Message);
+                _logger.Error("Error launching plugin '" + pluginName + "': " + ex.Message);
+
+                // Clean up any resources that were created
+                CleanupFailedLaunch(pluginName, pipeServer, process);
+
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Cleans up resources when a plugin launch fails partway through.
+        /// </summary>
+        private void CleanupFailedLaunch(string pluginName, NamedPipeServerStream pipeServer, Process process)
+        {
+            // Remove from tracking if it was added
+            _processes.TryRemove(pluginName, out _);
+            _pluginStates.TryRemove(pluginName, out _);
+
+            // Dispose pipe
+            if (pipeServer != null)
+            {
+                try
+                {
+                    pipeServer.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Error disposing pipe during cleanup: " + ex.Message);
+                }
+            }
+
+            // Kill and dispose process
+            if (process != null)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                        process.WaitForExit(1000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Error killing process during cleanup: " + ex.Message);
+                }
+
+                try
+                {
+                    process.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Error disposing process during cleanup: " + ex.Message);
+                }
             }
         }
 
@@ -121,8 +178,8 @@ namespace Microkernel.IPC
 
             try
             {
-                var ar = info.PipeServer. BeginWaitForConnection(null, null);
-                if (! ar.AsyncWaitHandle.WaitOne(30000))
+                var ar = info.PipeServer.BeginWaitForConnection(null, null);
+                if (!ar.AsyncWaitHandle.WaitOne(30000))
                 {
                     _logger.Error("Plugin '" + pluginName + "' connection timeout.");
                     SetPluginState(pluginName, "Faulted");
@@ -130,7 +187,7 @@ namespace Microkernel.IPC
                     return;
                 }
 
-                info.PipeServer. EndWaitForConnection(ar);
+                info.PipeServer.EndWaitForConnection(ar);
                 _logger.Info("Plugin '" + pluginName + "' connected.");
 
                 // IMPORTANT: Set state to Running BEFORE sending START command
@@ -173,10 +230,10 @@ namespace Microkernel.IPC
         {
             string pluginName = info.PluginName;
 
-            while (!_cts. IsCancellationRequested &&
+            while (!_cts.IsCancellationRequested &&
                    _processes.ContainsKey(pluginName) &&
                    info.PipeServer != null &&
-                   info. PipeServer.IsConnected)
+                   info.PipeServer.IsConnected)
             {
                 try
                 {
@@ -199,7 +256,7 @@ namespace Microkernel.IPC
                 }
                 catch (JsonException ex)
                 {
-                    _logger. Error("Invalid message from '" + pluginName + "': " + ex.Message);
+                    _logger.Error("Invalid message from '" + pluginName + "': " + ex.Message);
                 }
                 catch (Exception ex)
                 {
@@ -219,19 +276,28 @@ namespace Microkernel.IPC
         {
             switch (message.Type)
             {
-                case IpcMessageType. Heartbeat:
+                case IpcMessageType.Heartbeat:
                     info.LastHeartbeat = DateTime.UtcNow;
                     break;
 
                 case IpcMessageType.Publish:
                     if (message.Event != null)
                     {
-                        OnPluginPublish?. Invoke(message.Event);
+                        OnPluginPublish?.Invoke(message.Event);
                     }
+
                     break;
 
-                case IpcMessageType. Ack:
+                case IpcMessageType.Ack:
                     // Plugin acknowledged a command
+                    _logger.Debug("Plugin '" + info.PluginName + "' ACK: " + (message.Response ?? ""));
+                    break;
+
+                case IpcMessageType.Error:
+                    // Plugin reported an error
+                    _logger.Error("Plugin '" + info.PluginName + "' ERROR [" + message.ErrorCode + "]: " +
+                                  message.ErrorMessage);
+                    info.LastError = message.ErrorMessage;
                     break;
             }
         }
@@ -240,23 +306,25 @@ namespace Microkernel.IPC
         {
             try
             {
-                info.Process?. WaitForExit();
+                info.Process?.WaitForExit();
 
-                if (_processes.ContainsKey(info. PluginName) && GetPluginState(info.PluginName) == "Running")
+                if (_processes.ContainsKey(info.PluginName) && GetPluginState(info.PluginName) == "Running")
                 {
-                    int exitCode = info.Process?. ExitCode ?? -1;
+                    int exitCode = info.Process?.ExitCode ?? -1;
                     _logger.Error("Plugin '" + info.PluginName + "' crashed (exit code: " + exitCode + ")");
-                    SetPluginState(info. PluginName, "Faulted");
+                    SetPluginState(info.PluginName, "Faulted");
                     info.LastError = "Crashed with exit code " + exitCode;
                     _logger.Info("Kernel continues running.  Other plugins unaffected.");
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         public bool KillPlugin(string pluginName)
         {
-            if (! _processes.TryGetValue(pluginName, out var info))
+            if (!_processes.TryGetValue(pluginName, out var info))
             {
                 _logger.Warn("Plugin not found: " + pluginName);
                 return false;
@@ -264,9 +332,9 @@ namespace Microkernel.IPC
 
             try
             {
-                _logger. Warn("Forcefully killing plugin: " + pluginName);
+                _logger.Warn("Forcefully killing plugin: " + pluginName);
 
-                if (info.Process != null && ! info.Process.HasExited)
+                if (info.Process != null && !info.Process.HasExited)
                 {
                     info.Process.Kill();
                 }
@@ -279,20 +347,20 @@ namespace Microkernel.IPC
             }
             catch (Exception ex)
             {
-                _logger.Error("Error killing plugin '" + pluginName + "': " + ex. Message);
+                _logger.Error("Error killing plugin '" + pluginName + "': " + ex.Message);
                 return false;
             }
         }
 
         public bool RestartPlugin(string pluginName)
         {
-            if (! _processes.TryGetValue(pluginName, out var info))
+            if (!_processes.TryGetValue(pluginName, out var info))
             {
-                _logger. Warn("Plugin not found: " + pluginName);
+                _logger.Warn("Plugin not found: " + pluginName);
                 return false;
             }
 
-            string executablePath = info. ExecutablePath;
+            string executablePath = info.ExecutablePath;
 
             _logger.Info("Restarting plugin: " + pluginName);
 
@@ -304,23 +372,77 @@ namespace Microkernel.IPC
 
         public bool StopPlugin(string pluginName)
         {
-            if (! _processes.TryRemove(pluginName, out var info))
+            if (!_processes.TryRemove(pluginName, out var info))
                 return false;
 
             _pluginStates.TryRemove(pluginName, out _);
 
             try
             {
-                // Kill the process first to avoid blocking on pipe write
-                if (info.Process != null && !info.Process. HasExited)
+                // Step 1: Send shutdown command and give plugin time to cleanup
+                if (info.PipeServer != null && info.PipeServer.IsConnected)
                 {
-                    try { info.Process.Kill(); } catch { }
-                    try { info.Process.WaitForExit(1000); } catch { }
+                    try
+                    {
+                        _logger.Debug("Sending SHUTDOWN to plugin: " + pluginName);
+
+                        IpcProtocol.WriteMessage(info.PipeServer, new IpcMessage
+                        {
+                            Type = IpcMessageType.Shutdown,
+                            PluginName = pluginName
+                        });
+
+                        // Wait for plugin to exit gracefully (up to 3 seconds)
+                        if (info.Process != null && !info.Process.HasExited)
+                        {
+                            _logger.Debug("Waiting for plugin to exit gracefully...");
+                            bool exited = info.Process.WaitForExit(3000);
+
+                            if (exited)
+                            {
+                                _logger.Debug("Plugin '" + pluginName + "' exited gracefully.");
+                            }
+                            else
+                            {
+                                _logger.Warn("Plugin '" + pluginName + "' did not exit in time, forcing kill.");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug("Error sending shutdown: " + ex.Message);
+                    }
                 }
 
-                // Then dispose resources
-                try { info.PipeServer?.Dispose(); } catch { }
-                try { info. Process?.Dispose(); } catch { }
+                // Step 2: Force kill if still running
+                if (info.Process != null && !info.Process.HasExited)
+                {
+                    try
+                    {
+                        info.Process.Kill();
+                        info.Process.WaitForExit(1000);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                // Step 3: Cleanup resources
+                try
+                {
+                    info.PipeServer?.Dispose();
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    info.Process?.Dispose();
+                }
+                catch
+                {
+                }
 
                 _logger.Info("Stopped plugin: " + pluginName);
                 return true;
@@ -334,7 +456,40 @@ namespace Microkernel.IPC
 
         public void StopAllPlugins()
         {
-            foreach (var pluginName in _processes. Keys. ToArray())
+            var pluginNames = _processes.Keys.ToArray();
+
+            if (pluginNames.Length == 0)
+                return;
+
+            _logger.Info("Stopping " + pluginNames.Length + " plugin(s)...");
+
+            // Send shutdown to all plugins first
+            foreach (var pluginName in pluginNames)
+            {
+                if (_processes.TryGetValue(pluginName, out var info))
+                {
+                    try
+                    {
+                        if (info.PipeServer != null && info.PipeServer.IsConnected)
+                        {
+                            IpcProtocol.WriteMessage(info.PipeServer, new IpcMessage
+                            {
+                                Type = IpcMessageType.Shutdown,
+                                PluginName = pluginName
+                            });
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            // Wait a moment for plugins to process shutdown
+            Thread.Sleep(500);
+
+            // Now stop each plugin (will force kill if needed)
+            foreach (var pluginName in pluginNames)
             {
                 StopPlugin(pluginName);
             }
@@ -342,7 +497,7 @@ namespace Microkernel.IPC
 
         public bool SendEvent(string pluginName, EventMessage evt)
         {
-            if (! _processes.TryGetValue(pluginName, out var info))
+            if (!_processes.TryGetValue(pluginName, out var info))
             {
                 _logger.Debug("SendEvent: Plugin not found: " + pluginName);
                 return false;
@@ -357,15 +512,15 @@ namespace Microkernel.IPC
 
             try
             {
-                if (info.PipeServer == null || ! info.PipeServer.IsConnected)
+                if (info.PipeServer == null || !info.PipeServer.IsConnected)
                 {
-                    _logger. Debug("SendEvent: Pipe not connected for '" + pluginName + "'");
+                    _logger.Debug("SendEvent: Pipe not connected for '" + pluginName + "'");
                     return false;
                 }
 
                 _logger.Debug("SendEvent: Sending '" + evt.Topic + "' to '" + pluginName + "'");
 
-                IpcProtocol. WriteMessage(info.PipeServer, new IpcMessage
+                IpcProtocol.WriteMessage(info.PipeServer, new IpcMessage
                 {
                     Type = IpcMessageType.Event,
                     PluginName = pluginName,
@@ -384,7 +539,7 @@ namespace Microkernel.IPC
 
         public void BroadcastEvent(EventMessage evt)
         {
-            foreach (var pluginName in _processes.Keys. ToArray())
+            foreach (var pluginName in _processes.Keys.ToArray())
             {
                 if (GetPluginState(pluginName) == "Running")
                 {
@@ -395,17 +550,18 @@ namespace Microkernel.IPC
 
         public void BroadcastEventExcept(EventMessage evt, string excludePluginName)
         {
-            _logger.Debug("BroadcastEventExcept: Broadcasting '" + evt.Topic + "' (exclude: '" + excludePluginName + "')");
+            _logger.Debug("BroadcastEventExcept: Broadcasting '" + evt.Topic + "' (exclude: '" + excludePluginName +
+                          "')");
 
-            foreach (var pluginName in _processes.Keys. ToArray())
+            foreach (var pluginName in _processes.Keys.ToArray())
             {
                 string state = GetPluginState(pluginName);
-                bool isExcluded = ! string.IsNullOrEmpty(excludePluginName) &&
-                                  pluginName. Contains(excludePluginName, StringComparison. OrdinalIgnoreCase);
+                bool isExcluded = !string.IsNullOrEmpty(excludePluginName) &&
+                                  pluginName.Contains(excludePluginName, StringComparison.OrdinalIgnoreCase);
 
                 _logger.Debug("  -> Plugin '" + pluginName + "': state=" + state + ", excluded=" + isExcluded);
 
-                if (state == "Running" && ! isExcluded)
+                if (state == "Running" && !isExcluded)
                 {
                     SendEvent(pluginName, evt);
                 }
@@ -426,13 +582,15 @@ namespace Microkernel.IPC
 
                 try
                 {
-                    if (info.Process != null && !info. Process.HasExited)
+                    if (info.Process != null && !info.Process.HasExited)
                     {
                         pid = info.Process.Id;
                         processExited = false;
                     }
                 }
-                catch { }
+                catch
+                {
+                }
 
                 string state = GetPluginState(pluginName);
 
@@ -448,7 +606,7 @@ namespace Microkernel.IPC
                     PluginName = pluginName,
                     ProcessId = pid,
                     State = state,
-                    StartedAt = info. StartedAt,
+                    StartedAt = info.StartedAt,
                     LastHeartbeat = info.LastHeartbeat,
                     LastError = info.LastError
                 });
@@ -483,22 +641,48 @@ namespace Microkernel.IPC
                 string line;
                 while ((line = reader.ReadLine()) != null)
                 {
-                    if (! string.IsNullOrWhiteSpace(line))
+                    if (!string.IsNullOrWhiteSpace(line))
                     {
                         _logger.Debug("[" + pluginName + "] " + line);
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _cts.Cancel();
-            StopAllPlugins();
-            _cts.Dispose();
+            if (_disposed)
+                return;
+
             _disposed = true;
+
+            // Signal cancellation to all background threads
+            try
+            {
+                _cts.Cancel();
+            }
+            catch
+            {
+            }
+
+            // Stop all plugins gracefully
+            StopAllPlugins();
+
+            // Dispose cancellation token source
+            try
+            {
+                _cts.Dispose();
+            }
+            catch
+            {
+            }
+
+            // Clear collections
+            _processes.Clear();
+            _pluginStates.Clear();
         }
     }
 

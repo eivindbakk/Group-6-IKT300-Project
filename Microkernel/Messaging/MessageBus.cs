@@ -1,20 +1,24 @@
 ﻿using System;
-using System.Collections.Generic;
-using System. Linq;
+using System.Collections.Concurrent;
+using System.Collections. Generic;
+using System.Linq;
 using Contracts;
 using Microkernel.Services;
 
 namespace Microkernel.Messaging
 {
+    /// <summary>
+    /// Thread-safe message bus for pub/sub communication. 
+    /// </summary>
     public sealed class MessageBus : IMessageBus
     {
         private readonly IKernelLogger _logger;
-        private readonly List<Subscription> _subscriptions = new List<Subscription>();
-        private readonly object _lock = new object();
+        private readonly ConcurrentDictionary<Guid, Subscription> _subscriptions;
 
         public MessageBus(IKernelLogger logger)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger ??  throw new ArgumentNullException(nameof(logger));
+            _subscriptions = new ConcurrentDictionary<Guid, Subscription>();
         }
 
         public void Publish(EventMessage message)
@@ -24,20 +28,20 @@ namespace Microkernel.Messaging
                 throw new ArgumentNullException(nameof(message));
             }
 
-            List<Subscription> matchingSubscriptions;
-            lock (_lock)
-            {
-                matchingSubscriptions = _subscriptions
-                    .Where(s => s.Matches(message.Topic))
-                    .ToList();
-            }
+            // Take a snapshot of subscriptions (thread-safe)
+            var allSubscriptions = _subscriptions.Values.ToArray();
+
+            var matchingSubscriptions = allSubscriptions
+                .Where(s => s. Matches(message. Topic))
+                .ToList();
 
             if (matchingSubscriptions.Count == 0)
             {
                 return;
             }
 
-            _logger.Debug(string.Format("Publishing message '{0}' to {1} subscriber(s)", message.Topic, matchingSubscriptions.Count));
+            _logger.Debug(string.Format("Publishing message '{0}' to {1} subscriber(s)", 
+                message.Topic, matchingSubscriptions. Count));
 
             foreach (var subscription in matchingSubscriptions)
             {
@@ -59,25 +63,26 @@ namespace Microkernel.Messaging
                 throw new ArgumentNullException(nameof(handler));
             }
 
-            Subscription subscription = null;
-            subscription = new Subscription(topicPattern, handler, () => Unsubscribe(subscription));
+            var subscription = new Subscription(
+                topicPattern,
+                handler,
+                id => Unsubscribe(id)
+            );
 
-            lock (_lock)
+            if (_subscriptions.TryAdd(subscription. Id, subscription))
             {
-                _subscriptions. Add(subscription);
+                _logger.Debug(string.Format("New subscription for pattern: {0}", topicPattern ??  "*"));
             }
 
-            _logger.Debug(string.Format("New subscription for pattern: {0}", topicPattern ??  "*"));
             return subscription;
         }
 
-        private void Unsubscribe(Subscription subscription)
+        private void Unsubscribe(Guid subscriptionId)
         {
-            lock (_lock)
+            if (_subscriptions.TryRemove(subscriptionId, out var removed))
             {
-                _subscriptions.Remove(subscription);
+                _logger.Debug(string.Format("Subscription removed for pattern: {0}", removed.TopicPattern ?? "*"));
             }
-            _logger.Debug(string.Format("Subscription removed for pattern: {0}", subscription.TopicPattern ??  "*"));
         }
     }
 }
