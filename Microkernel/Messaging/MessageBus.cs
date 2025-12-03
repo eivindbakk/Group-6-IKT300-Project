@@ -6,10 +6,6 @@ using Microkernel.Services;
 
 namespace Microkernel.Messaging
 {
-    /// <summary>
-    /// In-memory publish/subscribe message bus. 
-    /// Thread-safe implementation supporting topic-based routing.
-    /// </summary>
     public sealed class MessageBus : IMessageBus
     {
         private readonly IKernelLogger _logger;
@@ -32,17 +28,22 @@ namespace Microkernel.Messaging
             lock (_lock)
             {
                 matchingSubscriptions = _subscriptions
-                    .Where(s => s. Matches(message.Topic))
-                    . ToList();
+                    .Where(s => s.Matches(message.Topic))
+                    .ToList();
             }
 
-            _logger.Debug(string.Format("Publishing message '{0}' to {1} subscriber(s)", message. Topic, matchingSubscriptions.Count));
+            if (matchingSubscriptions.Count == 0)
+            {
+                return;
+            }
+
+            _logger.Debug(string.Format("Publishing message '{0}' to {1} subscriber(s)", message.Topic, matchingSubscriptions.Count));
 
             foreach (var subscription in matchingSubscriptions)
             {
                 try
                 {
-                    subscription. Handler(message);
+                    subscription.Handler(message);
                 }
                 catch (Exception ex)
                 {
@@ -63,7 +64,7 @@ namespace Microkernel.Messaging
 
             lock (_lock)
             {
-                _subscriptions.Add(subscription);
+                _subscriptions. Add(subscription);
             }
 
             _logger.Debug(string.Format("New subscription for pattern: {0}", topicPattern ??  "*"));

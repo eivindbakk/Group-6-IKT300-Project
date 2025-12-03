@@ -1,11 +1,11 @@
 ﻿using System;
-using System.IO;
+using System. IO;
 using System. IO.Pipes;
-using System.Runtime.  InteropServices;
-using System.Text.  Json;
-using System.Threading;
+using System. Runtime.InteropServices;
+using System.Text. Json;
+using System. Threading;
 using Contracts;
-using Contracts.Events;
+using Contracts. Events;
 using Contracts.IPC;
 
 namespace EventGeneratorPlugin
@@ -22,9 +22,14 @@ namespace EventGeneratorPlugin
         private static Thread _generatorThread;
         private static readonly object _lock = new object();
 
+        // CPU tracking using Windows API
+        private static long _lastTotalTime = 0;
+        private static long _lastIdleTime = 0;
+        private static bool _cpuInitialized = false;
+
         static void Main(string[] args)
         {
-            Console.WriteLine("[EventGenerator] Starting.. .");
+            Console.WriteLine("[EventGenerator] Starting...");
 
             _pipeName = GetPipeNameFromArgs(args);
             if (string.IsNullOrEmpty(_pipeName))
@@ -47,7 +52,7 @@ namespace EventGeneratorPlugin
 
         private static string GetPipeNameFromArgs(string[] args)
         {
-            for (int i = 0; i < args.Length - 1; i++)
+            for (int i = 0; i < args. Length - 1; i++)
             {
                 if (args[i] == "--pipe")
                     return args[i + 1];
@@ -57,7 +62,7 @@ namespace EventGeneratorPlugin
 
         private static void ConnectAndListen()
         {
-            using (_pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions. Asynchronous))
+            using (_pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
                 Console.WriteLine("[EventGenerator] Connecting.. .");
                 _pipeClient.Connect(30000);
@@ -74,7 +79,7 @@ namespace EventGeneratorPlugin
                 heartbeatThread.IsBackground = true;
                 heartbeatThread.Start();
 
-                while (_running && _pipeClient.IsConnected)
+                while (_running && _pipeClient. IsConnected)
                 {
                     try
                     {
@@ -144,7 +149,7 @@ namespace EventGeneratorPlugin
         {
             if (evt == null) return;
 
-            string topic = (evt.Topic ??  "").ToLowerInvariant(). Trim();
+            string topic = (evt.Topic ??  ""). ToLowerInvariant(). Trim();
             string payload = (evt.Payload ??  ""). Trim();
 
             Console.WriteLine("[EventGenerator] Received: " + topic);
@@ -168,15 +173,10 @@ namespace EventGeneratorPlugin
 
                 case "eventgenerator.interval":
                 case "generator.interval":
-                    if (int.TryParse(payload, out int intervalSec) && intervalSec > 0)
+                    if (int.TryParse(payload, out int interval) && interval >= 100)
                     {
-                        _intervalMs = intervalSec * 1000;
-                        Console.WriteLine("[EventGenerator] Interval: " + intervalSec + "s");
-                    }
-                    else if (int.TryParse(payload, out int intervalMs) && intervalMs >= 100)
-                    {
-                        _intervalMs = intervalMs;
-                        Console. WriteLine("[EventGenerator] Interval: " + intervalMs + "ms");
+                        _intervalMs = interval;
+                        Console.WriteLine("[EventGenerator] Interval: " + interval + "ms");
                     }
                     break;
             }
@@ -217,11 +217,9 @@ namespace EventGeneratorPlugin
             {
                 try
                 {
-                    // Generate system metrics every cycle
                     GenerateSystemMetricsEvent();
                     _eventsGenerated++;
 
-                    // Also generate other events periodically
                     if (_eventsGenerated % 3 == 0)
                     {
                         GenerateUserLoggedInEvent();
@@ -234,7 +232,7 @@ namespace EventGeneratorPlugin
                         _eventsGenerated++;
                     }
 
-                    Thread. Sleep(_intervalMs);
+                    Thread.Sleep(_intervalMs);
                 }
                 catch (Exception ex)
                 {
@@ -249,12 +247,12 @@ namespace EventGeneratorPlugin
         private static void GenerateUserLoggedInEvent()
         {
             string[] usernames = { "alice", "bob", "charlie", "diana", "eve", "frank", "grace" };
-            string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0.25", "192.168.0.1" };
+            string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0. 25", "192.168.0.1" };
 
             var userEvent = new UserLoggedInEvent
             {
                 UserId = Guid.NewGuid().ToString(),
-                Username = usernames[_random.Next(usernames.Length)],
+                Username = usernames[_random. Next(usernames. Length)],
                 IpAddress = ips[_random.Next(ips.Length)]
             };
 
@@ -262,7 +260,7 @@ namespace EventGeneratorPlugin
             {
                 Topic = "UserLoggedInEvent",
                 Payload = JsonSerializer. Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime. UtcNow,
                 Source = "EventGenerator"
             };
 
@@ -276,9 +274,9 @@ namespace EventGeneratorPlugin
 
             var dataEvent = new DataProcessedEvent
             {
-                DataSource = sources[_random.Next(sources.Length)],
+                DataSource = sources[_random.Next(sources. Length)],
                 RecordsProcessed = _random.Next(100, 10000),
-                ProcessingTimeMs = _random. NextDouble() * 500,
+                ProcessingTimeMs = _random.NextDouble() * 500,
                 Success = _random.Next(10) != 0
             };
 
@@ -294,21 +292,21 @@ namespace EventGeneratorPlugin
             };
 
             PublishEvent(eventMessage);
-            Console.WriteLine("[EventGenerator] DataProcessed: " + dataEvent.DataSource);
+            Console. WriteLine("[EventGenerator] DataProcessed: " + dataEvent.DataSource);
         }
 
         private static void GenerateSystemMetricsEvent()
         {
             double cpuUsage = GetCpuUsage();
             double memoryUsage = GetSystemMemoryUsage();
-            double diskUsage = GetDiskUsage();
+            double diskActivity = GetDiskActivity();
 
             var metricsEvent = new SystemMetricsEvent
             {
-                MachineName = Environment. MachineName,
+                MachineName = Environment.MachineName,
                 CpuUsagePercent = cpuUsage,
                 MemoryUsagePercent = memoryUsage,
-                DiskUsagePercent = diskUsage,
+                DiskUsagePercent = diskActivity,
                 Timestamp = DateTime. UtcNow
             };
 
@@ -321,39 +319,56 @@ namespace EventGeneratorPlugin
             };
 
             PublishEvent(eventMessage);
-            Console.WriteLine("[EventGenerator] SystemMetrics: CPU=" + cpuUsage. ToString("F1") + 
-                              "% RAM=" + memoryUsage.ToString("F1") + 
-                              "% Disk=" + diskUsage.ToString("F1") + "%");
+            Console.WriteLine("[EventGenerator] SystemMetrics: CPU=" + cpuUsage. ToString("F1") +
+                              "% RAM=" + memoryUsage.ToString("F1") +
+                              "% Disk=" + diskActivity.ToString("F1") + "%");
 
-            // Check thresholds and publish alerts
-            CheckThresholds(cpuUsage, memoryUsage, diskUsage);
+            CheckThresholds(cpuUsage, memoryUsage, diskActivity);
         }
 
         #endregion
 
         #region System Metrics Collection
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetSystemTimes(out long idleTime, out long kernelTime, out long userTime);
+
         private static double GetCpuUsage()
         {
-            // Base usage between 5-25%
-            double baseUsage = 5 + (_random.NextDouble() * 20);
-
-            // 10% chance of medium usage (25-50%)
-            if (_random.Next(10) == 0)
+            try
             {
-                baseUsage = 25 + (_random.NextDouble() * 25);
-            }
+                if (GetSystemTimes(out long idleTime, out long kernelTime, out long userTime))
+                {
+                    long totalTime = kernelTime + userTime;
 
-            // 5% chance of high spike (50-80%)
-            if (_random.Next(20) == 0)
-            {
-                baseUsage = 50 + (_random.NextDouble() * 30);
-            }
+                    if (_cpuInitialized)
+                    {
+                        long totalDiff = totalTime - _lastTotalTime;
+                        long idleDiff = idleTime - _lastIdleTime;
 
-            return Math.Min(100, baseUsage);
+                        if (totalDiff > 0)
+                        {
+                            double cpuUsage = (1.0 - ((double)idleDiff / totalDiff)) * 100.0;
+
+                            _lastTotalTime = totalTime;
+                            _lastIdleTime = idleTime;
+
+                            return Math.Max(0, Math.Min(100, cpuUsage));
+                        }
+                    }
+
+                    _lastTotalTime = totalTime;
+                    _lastIdleTime = idleTime;
+                    _cpuInitialized = true;
+
+                    return 0;
+                }
+            }
+            catch { }
+
+            return 10 + (_random.NextDouble() * 20);
         }
 
-        // Windows API for real memory usage
         [StructLayout(LayoutKind.Sequential)]
         private struct MEMORYSTATUSEX
         {
@@ -369,60 +384,52 @@ namespace EventGeneratorPlugin
         }
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType. Bool)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
         private static double GetSystemMemoryUsage()
         {
             try
             {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform. Windows))
-                {
-                    MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
-                    memStatus.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+                MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
+                memStatus.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
 
-                    if (GlobalMemoryStatusEx(ref memStatus))
-                    {
-                        return memStatus. dwMemoryLoad;
-                    }
+                if (GlobalMemoryStatusEx(ref memStatus))
+                {
+                    return memStatus.dwMemoryLoad;
                 }
             }
-            catch
-            {
-                // Fall through to simulated value
-            }
+            catch { }
 
-            // Fallback: simulated memory usage
-            return 40 + (_random.NextDouble() * 40);
+            return 40 + (_random. NextDouble() * 40);
         }
 
-        private static double GetDiskUsage()
+        private static double GetDiskActivity()
         {
-            try
-            {
-                var drive = new DriveInfo("C");
-                double used = drive.TotalSize - drive.AvailableFreeSpace;
-                return (used / drive.TotalSize) * 100;
-            }
-            catch
-            {
-                return 50 + (_random.NextDouble() * 30);
-            }
+            // Simulated disk activity - real disk I/O monitoring requires admin or PerformanceCounter
+            // which causes timeout issues
+            double baseActivity = 2 + (_random.NextDouble() * 8);
+            
+            if (_random.Next(20) == 0)
+                baseActivity = 20 + (_random. NextDouble() * 30);
+            
+            if (_random.Next(50) == 0)
+                baseActivity = 50 + (_random.NextDouble() * 40);
+
+            return Math.Min(100, baseActivity);
         }
 
         private static void CheckThresholds(double cpu, double memory, double disk)
         {
-            // CPU alerts
             if (cpu > 90)
             {
-                PublishAlert("alert.critical", "CPU critical: " + cpu. ToString("F1") + "%");
+                PublishAlert("alert. critical", "CPU critical: " + cpu.ToString("F1") + "%");
             }
             else if (cpu > 75)
             {
                 PublishAlert("alert.warning", "CPU high: " + cpu. ToString("F1") + "%");
             }
 
-            // Memory alerts
             if (memory > 90)
             {
                 PublishAlert("alert.critical", "Memory critical: " + memory.ToString("F1") + "%");
@@ -432,14 +439,13 @@ namespace EventGeneratorPlugin
                 PublishAlert("alert.warning", "Memory high: " + memory.ToString("F1") + "%");
             }
 
-            // Disk alerts
-            if (disk > 95)
+            if (disk > 90)
             {
-                PublishAlert("alert.critical", "Disk almost full: " + disk.ToString("F1") + "%");
+                PublishAlert("alert.critical", "Disk I/O critical: " + disk.ToString("F1") + "%");
             }
-            else if (disk > 85)
+            else if (disk > 70)
             {
-                PublishAlert("alert.warning", "Disk space low: " + disk. ToString("F1") + "%");
+                PublishAlert("alert.warning", "Disk I/O high: " + disk.ToString("F1") + "%");
             }
         }
 
@@ -449,7 +455,7 @@ namespace EventGeneratorPlugin
             {
                 Topic = topic,
                 Payload = message,
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime. UtcNow,
                 Source = "EventGenerator"
             };
 

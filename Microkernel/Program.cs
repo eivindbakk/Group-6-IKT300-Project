@@ -1,7 +1,8 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
+using System. Collections.Generic;
+using System.IO;
+using System. Linq;
+using System.  Threading;
 using Microkernel.Core;
 using Microkernel.Services;
 
@@ -11,265 +12,326 @@ namespace Microkernel
     {
         private static Kernel _kernel;
         private static CommandHandler _commandHandler;
-        private static List<string> _commandHistory = new List<string>();
-        private static int _historyIndex = -1;
         private static string _currentInput = "";
         private static int _cursorPosition = 0;
+        private static List<string> _commandHistory = new List<string>();
+        private static int _historyIndex = 0;
+        private static readonly object _consoleLock = new object();
+        private static int _inputLineRow = 0;
+        private static bool _running = true;
 
-        private static readonly string[] Commands =
-        {
-            "help", "status", "plugins", "demo",
-            "userlogin", "dataprocessed", "metrics", "send", "generate",
-            "load", "unload", "crash", "restart",
+        private static readonly string[] Commands = {
+            "help", "status", "plugins", "demo", "userlogin", "dataprocessed",
+            "metrics", "send", "generate", "load", "unload", "crash", "restart",
             "debug", "mute", "unmute", "exit"
         };
 
         static void Main(string[] args)
         {
-            Console.Title = "Microkernel - IKT300";
+            Console.Title = "Microkernel - IKT300 Project";
+            Console. Clear();
 
             PrintBanner();
 
-            try
-            {
-                var configuration = KernelConfiguration.CreateDefault();
-                _kernel = Kernel.CreateDefault(configuration);
-                _commandHandler = new CommandHandler(_kernel);
+            // Create kernel and command handler
+            _kernel = Kernel. CreateDefault();
+            _commandHandler = new CommandHandler(_kernel);
 
-                _kernel.Start();
+            // Start kernel (this loads plugins)
+            _kernel. Start();
 
-                // Wait a moment for plugins to connect
-                Thread.Sleep(500);
+            // Wait for plugins to connect
+            Thread.Sleep(1000);
 
-                Console.WriteLine();
-                PrintHelp();
-                Console.WriteLine();
+            // Now print help and set up input
+            Console.WriteLine();
+            PrintStartupInfo();
 
-                RunInputLoop();
-            }
-            catch (Exception ex)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Fatal error: " + ex.Message);
-                Console.ResetColor();
-            }
-            finally
-            {
-                Console.WriteLine("Shutting down...");
-                _kernel?.Dispose();
-            }
+            // Hook up output redirection AFTER startup info is printed
+            ConsoleKernelLogger.SetOutputHandler(WriteOutput);
+
+            _inputLineRow = Console.CursorTop;
+            RedrawInputLine();
+
+            RunInputLoop();
+
+            _kernel.Stop();
         }
 
         private static void PrintBanner()
         {
-            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.ForegroundColor = ConsoleColor. Cyan;
             Console.WriteLine(@"
-  __  __ _                _  __                    _ 
+  __  __ _                _  __                    _
  |  \/  (_) ___ _ __ ___ | |/ /___ _ __ _ __   ___| |
  | |\/| | |/ __| '__/ _ \| ' // _ \ '__| '_ \ / _ \ |
  | |  | | | (__| | | (_) | . \  __/ |  | | | |  __/ |
  |_|  |_|_|\___|_|  \___/|_|\_\___|_|  |_| |_|\___|_|
-                                                      
+
             IKT300 Project - Group 6
 ");
             Console.ResetColor();
+            Console.WriteLine();
         }
 
-        private static void PrintHelp()
+        private static void PrintStartupInfo()
         {
-            Console.WriteLine("Available Commands:");
+            Console. ForegroundColor = ConsoleColor.White;
+            Console. WriteLine("Available Commands:");
             Console.WriteLine("-------------------");
+            Console.ResetColor();
             Console.WriteLine("  help                  Show this help message");
             Console.WriteLine("  status                Show kernel status");
             Console.WriteLine("  plugins               List all loaded plugins");
-            Console.WriteLine("  demo                  Run demo with required events");
+            Console. WriteLine("  demo                  Run demo with required events");
             Console.WriteLine("  userlogin [name]      Send a UserLoggedInEvent");
             Console.WriteLine("  dataprocessed [n]     Send a DataProcessedEvent");
             Console.WriteLine("  send <topic> [data]   Publish a custom event");
-            Console.WriteLine("  load <path>           Load a plugin executable");
+            Console. WriteLine("  load <path>           Load a plugin executable");
             Console.WriteLine("  unload <plugin>       Unload a plugin");
             Console.WriteLine("  crash <plugin>        Kill a plugin (fault isolation test)");
             Console.WriteLine("  restart <plugin>      Restart a plugin");
             Console.WriteLine("  debug on|off          Toggle debug output");
-            Console.WriteLine("  mute / unmute         Mute/unmute console output");
+            Console. WriteLine("  mute / unmute         Mute/unmute console output");
             Console.WriteLine("  exit                  Stop kernel and exit");
+            Console.WriteLine();
+        }
+
+        public static void WriteOutput(string message)
+        {
+            lock (_consoleLock)
+            {
+                string savedInput = _currentInput;
+                int savedCursor = _cursorPosition;
+
+                ClearInputLine();
+
+                Console.SetCursorPosition(0, _inputLineRow);
+                Console.WriteLine(message);
+
+                _inputLineRow = Console. CursorTop;
+
+                _currentInput = savedInput;
+                _cursorPosition = savedCursor;
+                RedrawInputLine();
+            }
+        }
+
+        private static void ClearInputLine()
+        {
+            try
+            {
+                Console.SetCursorPosition(0, _inputLineRow);
+                Console.Write(new string(' ', Console.WindowWidth - 1));
+                Console.SetCursorPosition(0, _inputLineRow);
+            }
+            catch { }
+        }
+
+        private static void RedrawInputLine()
+        {
+            try
+            {
+                Console.SetCursorPosition(0, _inputLineRow);
+                Console.Write("> " + _currentInput + new string(' ', Math.Max(0, Console.WindowWidth - _currentInput.Length - 3)));
+                Console.SetCursorPosition(2 + _cursorPosition, _inputLineRow);
+            }
+            catch { }
         }
 
         private static void RunInputLoop()
         {
-            while (true)
+            while (_running)
             {
-                Console.Write("> ");
-                string input = ReadLineWithHistory();
-
-                if (string.IsNullOrWhiteSpace(input))
-                    continue;
-
-                if (_commandHistory.Count == 0 || _commandHistory[_commandHistory.Count - 1] != input)
-                {
-                    _commandHistory.Add(input);
-                }
-
-                _historyIndex = _commandHistory.Count;
-
                 try
                 {
-                    bool shouldExit = _commandHandler.ProcessCommand(input);
-                    if (shouldExit)
+                    if (! Console.KeyAvailable)
                     {
-                        break;
+                        Thread.Sleep(10);
+                        continue;
+                    }
+
+                    var key = Console.ReadKey(true);
+
+                    lock (_consoleLock)
+                    {
+                        HandleKeyPress(key);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Error: " + ex.Message);
-                    Console.ResetColor();
+                    break;
                 }
             }
         }
 
-        private static string ReadLineWithHistory()
+        private static void HandleKeyPress(ConsoleKeyInfo key)
         {
+            switch (key.Key)
+            {
+                case ConsoleKey. Enter:
+                    HandleEnter();
+                    break;
+
+                case ConsoleKey.Backspace:
+                    HandleBackspace();
+                    break;
+
+                case ConsoleKey.Delete:
+                    HandleDelete();
+                    break;
+
+                case ConsoleKey. LeftArrow:
+                    if (_cursorPosition > 0)
+                    {
+                        _cursorPosition--;
+                        RedrawInputLine();
+                    }
+                    break;
+
+                case ConsoleKey.RightArrow:
+                    if (_cursorPosition < _currentInput.Length)
+                    {
+                        _cursorPosition++;
+                        RedrawInputLine();
+                    }
+                    break;
+
+                case ConsoleKey. UpArrow:
+                    HandleUpArrow();
+                    break;
+
+                case ConsoleKey.DownArrow:
+                    HandleDownArrow();
+                    break;
+
+                case ConsoleKey.Tab:
+                    HandleTabCompletion();
+                    break;
+
+                case ConsoleKey. Home:
+                    _cursorPosition = 0;
+                    RedrawInputLine();
+                    break;
+
+                case ConsoleKey.End:
+                    _cursorPosition = _currentInput.Length;
+                    RedrawInputLine();
+                    break;
+
+                case ConsoleKey.Escape:
+                    _currentInput = "";
+                    _cursorPosition = 0;
+                    RedrawInputLine();
+                    break;
+
+                default:
+                    if (! char.IsControl(key.KeyChar))
+                    {
+                        _currentInput = _currentInput.Insert(_cursorPosition, key.KeyChar. ToString());
+                        _cursorPosition++;
+                        RedrawInputLine();
+                    }
+                    break;
+            }
+        }
+
+        private static void HandleEnter()
+        {
+            string input = _currentInput. Trim();
             _currentInput = "";
             _cursorPosition = 0;
 
-            while (true)
+            ClearInputLine();
+            _inputLineRow++;
+
+            if (_inputLineRow >= Console. BufferHeight - 1)
             {
-                ConsoleKeyInfo key = Console.ReadKey(true);
+                _inputLineRow = Console.BufferHeight - 2;
+            }
 
-                switch (key.Key)
+            if (! string.IsNullOrEmpty(input))
+            {
+                _commandHistory.Add(input);
+                _historyIndex = _commandHistory.Count;
+
+                bool shouldExit = _commandHandler.ProcessCommand(input);
+                if (shouldExit)
                 {
-                    case ConsoleKey.Enter:
-                        Console.WriteLine();
-                        return _currentInput;
-
-                    case ConsoleKey.Backspace:
-                        if (_cursorPosition > 0)
-                        {
-                            _currentInput = _currentInput.Remove(_cursorPosition - 1, 1);
-                            _cursorPosition--;
-                            RedrawInput();
-                        }
-
-                        break;
-
-                    case ConsoleKey.Delete:
-                        if (_cursorPosition < _currentInput.Length)
-                        {
-                            _currentInput = _currentInput.Remove(_cursorPosition, 1);
-                            RedrawInput();
-                        }
-
-                        break;
-
-                    case ConsoleKey.LeftArrow:
-                        if (_cursorPosition > 0)
-                        {
-                            _cursorPosition--;
-                            Console.CursorLeft--;
-                        }
-
-                        break;
-
-                    case ConsoleKey.RightArrow:
-                        if (_cursorPosition < _currentInput.Length)
-                        {
-                            _cursorPosition++;
-                            Console.CursorLeft++;
-                        }
-
-                        break;
-
-                    case ConsoleKey.UpArrow:
-                        if (_historyIndex > 0)
-                        {
-                            _historyIndex--;
-                            _currentInput = _commandHistory[_historyIndex];
-                            _cursorPosition = _currentInput.Length;
-                            RedrawInput();
-                        }
-
-                        break;
-
-                    case ConsoleKey.DownArrow:
-                        if (_historyIndex < _commandHistory.Count - 1)
-                        {
-                            _historyIndex++;
-                            _currentInput = _commandHistory[_historyIndex];
-                            _cursorPosition = _currentInput.Length;
-                            RedrawInput();
-                        }
-                        else if (_historyIndex == _commandHistory.Count - 1)
-                        {
-                            _historyIndex = _commandHistory.Count;
-                            _currentInput = "";
-                            _cursorPosition = 0;
-                            RedrawInput();
-                        }
-
-                        break;
-
-                    case ConsoleKey.Tab:
-                        HandleTabCompletion();
-                        break;
-
-                    case ConsoleKey.Home:
-                        Console.CursorLeft -= _cursorPosition;
-                        _cursorPosition = 0;
-                        break;
-
-                    case ConsoleKey.End:
-                        Console.CursorLeft += (_currentInput.Length - _cursorPosition);
-                        _cursorPosition = _currentInput.Length;
-                        break;
-
-                    case ConsoleKey.Escape:
-                        _currentInput = "";
-                        _cursorPosition = 0;
-                        RedrawInput();
-                        break;
-
-                    default:
-                        if (!char.IsControl(key.KeyChar))
-                        {
-                            _currentInput = _currentInput.Insert(_cursorPosition, key.KeyChar.ToString());
-                            _cursorPosition++;
-                            RedrawInput();
-                        }
-
-                        break;
+                    _running = false;
+                    return;
                 }
+            }
+
+            _inputLineRow = Console.CursorTop;
+            RedrawInputLine();
+        }
+
+        private static void HandleBackspace()
+        {
+            if (_cursorPosition > 0)
+            {
+                _currentInput = _currentInput.Remove(_cursorPosition - 1, 1);
+                _cursorPosition--;
+                RedrawInputLine();
             }
         }
 
-        private static void RedrawInput()
+        private static void HandleDelete()
         {
-            int promptLength = 2; // "> "
-            Console.CursorLeft = promptLength;
-            Console.Write(_currentInput + new string(' ', 20));
-            Console.CursorLeft = promptLength + _cursorPosition;
+            if (_cursorPosition < _currentInput.Length)
+            {
+                _currentInput = _currentInput.Remove(_cursorPosition, 1);
+                RedrawInputLine();
+            }
+        }
+
+        private static void HandleUpArrow()
+        {
+            if (_historyIndex > 0)
+            {
+                _historyIndex--;
+                _currentInput = _commandHistory[_historyIndex];
+                _cursorPosition = _currentInput.Length;
+                RedrawInputLine();
+            }
+        }
+
+        private static void HandleDownArrow()
+        {
+            if (_historyIndex < _commandHistory.Count - 1)
+            {
+                _historyIndex++;
+                _currentInput = _commandHistory[_historyIndex];
+                _cursorPosition = _currentInput.Length;
+                RedrawInputLine();
+            }
+            else if (_historyIndex == _commandHistory.Count - 1)
+            {
+                _historyIndex = _commandHistory.Count;
+                _currentInput = "";
+                _cursorPosition = 0;
+                RedrawInputLine();
+            }
         }
 
         private static void HandleTabCompletion()
         {
-            string input = _currentInput.ToLowerInvariant().TrimStart();
+            string input = _currentInput. ToLowerInvariant(). TrimStart();
             var matches = new List<string>();
 
-            // Check if we're completing a command argument
-            string[] parts = input.Split(' ', 2);
+            string[] parts = input. Split(' ', 2);
             string command = parts[0];
-            string partialArg = parts.Length > 1 ? parts[1] : null;
+            string partialArg = parts. Length > 1 ? parts[1] : null;
 
             if (partialArg != null)
             {
-                // Complete plugin name for these commands
                 if (command == "crash" || command == "restart" || command == "unload")
                 {
                     var plugins = _kernel.GetLoadedPlugins();
                     foreach (var plugin in plugins)
                     {
-                        string name = plugin.Name.ToLowerInvariant();
+                        string name = plugin.Name. ToLowerInvariant();
                         if (name.Contains(partialArg) || partialArg == "")
                         {
                             matches.Add(command + " " + plugin.Name);
@@ -278,16 +340,21 @@ namespace Microkernel
                 }
                 else if (command == "debug")
                 {
-                    if ("on".StartsWith(partialArg)) matches.Add("debug on");
+                    if ("on". StartsWith(partialArg)) matches. Add("debug on");
                     if ("off".StartsWith(partialArg)) matches.Add("debug off");
+                }
+                else if (command == "generate")
+                {
+                    if ("start". StartsWith(partialArg)) matches. Add("generate start");
+                    if ("stop".StartsWith(partialArg)) matches.Add("generate stop");
+                    if ("toggle".StartsWith(partialArg)) matches.Add("generate toggle");
                 }
             }
             else
             {
-                // Complete command
                 foreach (var cmd in Commands)
                 {
-                    if (cmd.StartsWith(command))
+                    if (cmd. StartsWith(command))
                     {
                         matches.Add(cmd);
                     }
@@ -298,15 +365,11 @@ namespace Microkernel
             {
                 _currentInput = matches[0];
                 _cursorPosition = _currentInput.Length;
-                RedrawInput();
+                RedrawInputLine();
             }
             else if (matches.Count > 1)
             {
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine(string.Join("  ", matches));
-                Console.ResetColor();
-                Console.Write("> " + _currentInput);
+                WriteOutput(string.Join("  ", matches));
             }
         }
     }

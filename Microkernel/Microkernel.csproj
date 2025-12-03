@@ -24,11 +24,11 @@
                 DestinationFolder="$(OutputPath)"
                 SkipUnchangedFiles="true"
                 ContinueOnError="true" />
-        <Copy
+        <!--<Copy
                 SourceFiles=". .\Plugins\MetricsLoggerProcess\bin\$(Configuration)\net8.0\MetricsLogger.runtimeconfig.json"
                 DestinationFolder="$(OutputPath)"
                 SkipUnchangedFiles="true"
-                ContinueOnError="true" />
+                ContinueOnError="true" /> -->
     </Target>
 
 </Project>

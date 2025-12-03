@@ -2,81 +2,69 @@
 
 namespace Microkernel.Services
 {
-    public enum LogLevel
-    {
-        Debug = 0,
-        Info = 1,
-        Warn = 2,
-        Error = 3
-    }
-
     public class ConsoleKernelLogger : IKernelLogger
     {
+        private static bool _debugEnabled = false;
         private static bool _muted = false;
-        private static LogLevel _minLevel = LogLevel. Info;
-        private static readonly object _lock = new object();
+        private static Action<string> _outputHandler = null;
+
+        public static void SetOutputHandler(Action<string> handler)
+        {
+            _outputHandler = handler;
+        }
+
+        public static void EnableDebug()
+        {
+            _debugEnabled = true;
+        }
+
+        public static void DisableDebug()
+        {
+            _debugEnabled = false;
+        }
 
         public static void SetMuted(bool muted)
         {
             _muted = muted;
         }
 
-        public static void EnableDebug()
+        private void Output(string message)
         {
-            _minLevel = LogLevel. Debug;
-        }
+            if (_muted) return;
 
-        public static void DisableDebug()
-        {
-            _minLevel = LogLevel. Info;
-        }
-
-        public void Debug(string message)
-        {
-            if (_minLevel <= LogLevel. Debug)
+            if (_outputHandler != null)
             {
-                Log("DEBUG", message, ConsoleColor.DarkGray);
+                _outputHandler(message);
+            }
+            else
+            {
+                Console.WriteLine(message);
             }
         }
 
         public void Info(string message)
         {
-            if (_minLevel <= LogLevel.Info)
-            {
-                Log("INFO ", message, ConsoleColor.White);
-            }
+            string line = "[" + DateTime.Now. ToString("HH:mm:ss. fff") + "] [INFO ] " + message;
+            Output(line);
         }
 
         public void Warn(string message)
         {
-            if (_minLevel <= LogLevel. Warn)
-            {
-                Log("WARN ", message, ConsoleColor.Yellow);
-            }
+            string line = "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] [WARN ] " + message;
+            Output(line);
         }
 
         public void Error(string message)
         {
-            if (_minLevel <= LogLevel.Error)
-            {
-                Log("ERROR", message, ConsoleColor.Red);
-            }
+            string line = "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] [ERROR] " + message;
+            Output(line);
         }
 
-        private void Log(string level, string message, ConsoleColor color)
+        public void Debug(string message)
         {
-            if (_muted) return;
-
-            lock (_lock)
-            {
-                string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.Write("[" + timestamp + "] ");
-                Console. ForegroundColor = color;
-                Console.Write("[" + level + "] ");
-                Console.ResetColor();
-                Console.WriteLine(message);
-            }
+            if (! _debugEnabled) return;
+            string line = "[" + DateTime.Now.ToString("HH:mm:ss. fff") + "] [DEBUG] " + message;
+            Output(line);
         }
     }
 }

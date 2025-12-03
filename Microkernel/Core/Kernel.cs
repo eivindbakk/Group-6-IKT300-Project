@@ -36,10 +36,7 @@ namespace Microkernel. Core
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _processManager = new PluginProcessManager(logger);
 
-            // Handle events published by external plugin processes
-            _processManager.OnPluginPublish += HandleExternalPluginEvent;
-            // In the Kernel constructor, after creating _processManager:
-            _processManager. OnPluginPublish += HandlePluginPublish;
+            _processManager.OnPluginPublish += HandlePluginPublish;
         }
 
         public static Kernel CreateDefault()
@@ -50,14 +47,12 @@ namespace Microkernel. Core
         private void HandlePluginPublish(EventMessage evt)
         {
             if (evt == null) return;
-    
-            _logger.Debug("Plugin published: " + evt.Topic);
-    
-            // Broadcast to all plugins (the process manager will exclude the source)
+
+            _logger. Debug("Plugin published: " + evt.Topic);
+
             _processManager.BroadcastEventExcept(evt, evt.Source ??  "");
-    
-            // Also publish to internal subscribers
-            _messageBus. Publish(evt);
+
+            _messageBus.Publish(evt);
         }
 
         public static Kernel CreateDefault(KernelConfiguration configuration)
@@ -229,16 +224,6 @@ namespace Microkernel. Core
                     _logger. Warn("Plugin executable not found: " + exePath);
                 }
             }
-        }
-
-        private void HandleExternalPluginEvent(EventMessage evt)
-        {
-            if (evt == null) return;
-
-            _messageBus.Publish(evt);
-
-            string sourcePlugin = evt.Source ??  "";
-            _processManager.BroadcastEventExcept(evt, sourcePlugin);
         }
 
         public void Dispose()

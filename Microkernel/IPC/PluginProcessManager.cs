@@ -102,8 +102,8 @@ namespace Microkernel.IPC
 
                 new Thread(() => ConnectionHandler(info)) { IsBackground = true }. Start();
                 new Thread(() => ProcessMonitor(info)) { IsBackground = true }. Start();
-                new Thread(() => ConsumeStream(process.StandardOutput)) { IsBackground = true }. Start();
-                new Thread(() => ConsumeStream(process. StandardError)) { IsBackground = true }.Start();
+                new Thread(() => ConsumeStream(process.StandardOutput, pluginName)) { IsBackground = true }.Start();
+                new Thread(() => ConsumeStream(process. StandardError, pluginName)) { IsBackground = true }.Start();
 
                 _logger.Info("Launched plugin process: " + pluginName + " (PID: " + process.Id + ")");
                 return true;
@@ -342,15 +342,30 @@ namespace Microkernel.IPC
 
         public bool SendEvent(string pluginName, EventMessage evt)
         {
-            if (!_processes.TryGetValue(pluginName, out var info))
+            if (! _processes.TryGetValue(pluginName, out var info))
+            {
+                _logger.Debug("SendEvent: Plugin not found: " + pluginName);
                 return false;
+            }
 
-            if (GetPluginState(pluginName) != "Running")
+            string state = GetPluginState(pluginName);
+            if (state != "Running")
+            {
+                _logger.Debug("SendEvent: Plugin '" + pluginName + "' not running (state: " + state + ")");
                 return false;
+            }
 
             try
             {
-                IpcProtocol.WriteMessage(info.PipeServer, new IpcMessage
+                if (info.PipeServer == null || ! info.PipeServer.IsConnected)
+                {
+                    _logger. Debug("SendEvent: Pipe not connected for '" + pluginName + "'");
+                    return false;
+                }
+
+                _logger.Debug("SendEvent: Sending '" + evt.Topic + "' to '" + pluginName + "'");
+
+                IpcProtocol. WriteMessage(info.PipeServer, new IpcMessage
                 {
                     Type = IpcMessageType.Event,
                     PluginName = pluginName,
@@ -380,10 +395,17 @@ namespace Microkernel.IPC
 
         public void BroadcastEventExcept(EventMessage evt, string excludePluginName)
         {
-            foreach (var pluginName in _processes.Keys.ToArray())
+            _logger.Debug("BroadcastEventExcept: Broadcasting '" + evt.Topic + "' (exclude: '" + excludePluginName + "')");
+
+            foreach (var pluginName in _processes.Keys. ToArray())
             {
-                if (GetPluginState(pluginName) == "Running" &&
-                    ! pluginName.Contains(excludePluginName, StringComparison. OrdinalIgnoreCase))
+                string state = GetPluginState(pluginName);
+                bool isExcluded = ! string.IsNullOrEmpty(excludePluginName) &&
+                                  pluginName. Contains(excludePluginName, StringComparison. OrdinalIgnoreCase);
+
+                _logger.Debug("  -> Plugin '" + pluginName + "': state=" + state + ", excluded=" + isExcluded);
+
+                if (state == "Running" && ! isExcluded)
                 {
                     SendEvent(pluginName, evt);
                 }
@@ -454,9 +476,19 @@ namespace Microkernel.IPC
             return (total, running, faulted);
         }
 
-        private void ConsumeStream(StreamReader reader)
+        private void ConsumeStream(StreamReader reader, string pluginName)
         {
-            try { while (reader.ReadLine() != null) { } }
+            try
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (! string.IsNullOrWhiteSpace(line))
+                    {
+                        _logger.Debug("[" + pluginName + "] " + line);
+                    }
+                }
+            }
             catch { }
         }
 
