@@ -1,20 +1,27 @@
 ﻿using System;
-using System. IO;
-using System. IO.Pipes;
-using System. Runtime.InteropServices;
-using System.Text. Json;
-using System. Threading;
+using System.  IO;
+using System.  IO. Pipes;
+using System.  Runtime.InteropServices;
+using System. Text.  Json;
+using System.  Threading;
 using Contracts;
-using Contracts. Events;
-using Contracts.IPC;
+using Contracts.  Events;
+using Contracts. IPC;
 
 namespace EventGeneratorPlugin
 {
+    /// <summary>
+    /// EventGenerator plugin - generates system metrics and simulated events. 
+    /// Runs as a separate process and communicates with the kernel via named pipes.
+    /// </summary>
     class Program
     {
+        // IPC connection state
         private static string _pipeName;
         private static NamedPipeClientStream _pipeClient;
         private static bool _running = true;
+        
+        // Generation state
         private static bool _generating = false;
         private static int _intervalMs = 3000;
         private static int _eventsGenerated = 0;
@@ -22,7 +29,7 @@ namespace EventGeneratorPlugin
         private static Thread _generatorThread;
         private static readonly object _lock = new object();
 
-        // CPU tracking using Windows API
+        // CPU tracking state for Windows API calls
         private static long _lastTotalTime = 0;
         private static long _lastIdleTime = 0;
         private static bool _cpuInitialized = false;
@@ -31,6 +38,7 @@ namespace EventGeneratorPlugin
         {
             Console.WriteLine("[EventGenerator] Starting...");
 
+            // Get pipe name from command line arguments (passed by kernel)
             _pipeName = GetPipeNameFromArgs(args);
             if (string.IsNullOrEmpty(_pipeName))
             {
@@ -47,12 +55,16 @@ namespace EventGeneratorPlugin
                 Console.WriteLine("[EventGenerator] Fatal error: " + ex.Message);
             }
 
-            Console.WriteLine("[EventGenerator] Shutting down.  Events generated: " + _eventsGenerated);
+            Console.WriteLine("[EventGenerator] Shutting down.   Events generated: " + _eventsGenerated);
         }
 
+        /// <summary>
+        /// Extracts the pipe name from command line arguments.
+        /// Expects format: --pipe <pipename>
+        /// </summary>
         private static string GetPipeNameFromArgs(string[] args)
         {
-            for (int i = 0; i < args. Length - 1; i++)
+            for (int i = 0; i < args.  Length - 1; i++)
             {
                 if (args[i] == "--pipe")
                     return args[i + 1];
@@ -60,33 +72,39 @@ namespace EventGeneratorPlugin
             return null;
         }
 
+        /// <summary>
+        /// Connects to the kernel's named pipe and enters the message loop.
+        /// </summary>
         private static void ConnectAndListen()
         {
             using (_pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
-                Console.WriteLine("[EventGenerator] Connecting.. .");
+                Console.WriteLine("[EventGenerator] Connecting..  .");
                 _pipeClient.Connect(30000);
                 Console.WriteLine("[EventGenerator] Connected!");
 
+                // Send ready acknowledgment to kernel
                 SendMessage(new IpcMessage
                 {
-                    Type = IpcMessageType. Ack,
+                    Type = IpcMessageType.  Ack,
                     PluginName = "EventGenerator",
                     Response = "Ready"
                 });
 
+                // Start heartbeat thread to keep connection alive
                 var heartbeatThread = new Thread(SendHeartbeats);
                 heartbeatThread.IsBackground = true;
                 heartbeatThread.Start();
 
-                while (_running && _pipeClient. IsConnected)
+                // Main message loop - process messages from kernel
+                while (_running && _pipeClient.  IsConnected)
                 {
                     try
                     {
                         var message = IpcProtocol.ReadMessage(_pipeClient);
                         if (message == null)
                         {
-                            Thread.Sleep(10);
+                            Thread. Sleep(10);
                             continue;
                         }
 
@@ -104,18 +122,21 @@ namespace EventGeneratorPlugin
             }
         }
 
+        /// <summary>
+        /// Background thread that sends periodic heartbeats to the kernel.
+        /// </summary>
         private static void SendHeartbeats()
         {
-            while (_running && _pipeClient != null && _pipeClient. IsConnected)
+            while (_running && _pipeClient != null && _pipeClient.  IsConnected)
             {
                 try
                 {
                     Thread.Sleep(5000);
-                    if (_pipeClient. IsConnected)
+                    if (_pipeClient.  IsConnected)
                     {
                         SendMessage(new IpcMessage
                         {
-                            Type = IpcMessageType.Heartbeat,
+                            Type = IpcMessageType. Heartbeat,
                             PluginName = "EventGenerator"
                         });
                     }
@@ -124,38 +145,45 @@ namespace EventGeneratorPlugin
             }
         }
 
+        /// <summary>
+        /// Handles messages received from the kernel. 
+        /// </summary>
         private static void HandleMessage(IpcMessage message)
         {
             switch (message.Type)
             {
-                case IpcMessageType.Start:
+                case IpcMessageType. Start:
                     Console.WriteLine("[EventGenerator] Received START from kernel.");
                     break;
 
-                case IpcMessageType. Shutdown:
+                case IpcMessageType.  Shutdown:
                     Console.WriteLine("[EventGenerator] Received SHUTDOWN.");
                     StopGenerating();
                     _running = false;
                     break;
 
-                case IpcMessageType. Event:
+                case IpcMessageType.  Event:
+                    // Forward events to the event handler
                     if (message.Event != null)
                         HandleEvent(message.Event);
                     break;
             }
         }
 
+        /// <summary>
+        /// Handles events received from the kernel (typically control commands).
+        /// </summary>
         private static void HandleEvent(EventMessage evt)
         {
             if (evt == null) return;
 
-            string topic = (evt.Topic ?? "").ToLowerInvariant(). Trim();
-            string payload = (evt. Payload ?? ""). Trim();
+            string topic = (evt.Topic ??  "").ToLowerInvariant().  Trim();
+            string payload = (evt.  Payload ?? "").  Trim();
 
             Console.WriteLine("[EventGenerator] Received: " + topic);
 
-            // Use constants (compare lowercase since we lowered the topic)
-            if (topic == EventTopics.GeneratorStart.ToLowerInvariant() ||
+            // Handle generator control commands
+            if (topic == EventTopics.GeneratorStart. ToLowerInvariant() ||
                 topic == "eventgenerator.start")
             {
                 StartGenerating();
@@ -166,13 +194,15 @@ namespace EventGeneratorPlugin
                 StopGenerating();
             }
             else if (topic == EventTopics.GeneratorNow.ToLowerInvariant() ||
-                     topic == "eventgenerator. now")
+                     topic == "eventgenerator.now")
             {
+                // Generate a single event immediately
                 GenerateSystemMetricsEvent();
             }
             else if (topic == EventTopics.GeneratorInterval.ToLowerInvariant() ||
                      topic == "eventgenerator.interval")
             {
+                // Update generation interval
                 if (int.TryParse(payload, out int interval) && interval >= 100)
                 {
                     _intervalMs = interval;
@@ -181,22 +211,25 @@ namespace EventGeneratorPlugin
             }
         }
 
+        /// <summary>
+        /// Starts the event generation thread.
+        /// </summary>
         private static void StartGenerating()
         {
             lock (_lock)
             {
                 if (_generating)
                 {
-                    Console. WriteLine("[EventGenerator] Already generating.");
+                    Console.  WriteLine("[EventGenerator] Already generating.");
                     return;
                 }
 
                 _generating = true;
                 _generatorThread = new Thread(GeneratorLoop);
                 _generatorThread.IsBackground = true;
-                _generatorThread.Start();
+                _generatorThread. Start();
 
-                Console.WriteLine("[EventGenerator] Started.  Interval: " + _intervalMs + "ms");
+                Console.WriteLine("[EventGenerator] Started.   Interval: " + _intervalMs + "ms");
             }
         }
 
@@ -210,21 +243,28 @@ namespace EventGeneratorPlugin
             }
         }
 
+        /// <summary>
+        /// Main generation loop - runs on a background thread.
+        /// Generates events at regular intervals. 
+        /// </summary>
         private static void GeneratorLoop()
         {
-            while (_generating && _running && _pipeClient != null && _pipeClient.IsConnected)
+            while (_generating && _running && _pipeClient != null && _pipeClient. IsConnected)
             {
                 try
                 {
+                    // Always generate system metrics
                     GenerateSystemMetricsEvent();
                     _eventsGenerated++;
 
+                    // Generate UserLoggedIn every 3rd cycle
                     if (_eventsGenerated % 3 == 0)
                     {
                         GenerateUserLoggedInEvent();
                         _eventsGenerated++;
                     }
 
+                    // Generate DataProcessed every 5th cycle
                     if (_eventsGenerated % 5 == 0)
                     {
                         GenerateDataProcessedEvent();
@@ -243,57 +283,67 @@ namespace EventGeneratorPlugin
 
         #region Event Generators
 
+        /// <summary>
+        /// Generates a simulated UserLoggedInEvent with random data.
+        /// </summary>
         private static void GenerateUserLoggedInEvent()
         {
             string[] usernames = { "alice", "bob", "charlie", "diana", "eve", "frank", "grace" };
-            string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0. 25", "192.168.0.1" };
+            string[] ips = { "192.168.1.100", "10.0.0.50", "172.16.0.25", "192.168.0.1" };
 
             var userEvent = new UserLoggedInEvent
             {
                 UserId = Guid.NewGuid().ToString(),
-                Username = usernames[_random. Next(usernames. Length)],
-                IpAddress = ips[_random.Next(ips.Length)]
+                Username = usernames[_random.  Next(usernames.  Length)],
+                IpAddress = ips[_random. Next(ips. Length)]
             };
 
             var eventMessage = new EventMessage
             {
-                Topic = EventTopics.UserLoggedIn,
-                Payload = JsonSerializer. Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime. UtcNow,
+                Topic = EventTopics. UserLoggedIn,
+                Payload = JsonSerializer.  Serialize(userEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Timestamp = DateTime.  UtcNow,
                 Source = "EventGenerator"
             };
 
             PublishEvent(eventMessage);
-            Console.WriteLine("[EventGenerator] UserLoggedIn: " + userEvent.Username);
+            Console.WriteLine("[EventGenerator] UserLoggedIn: " + userEvent. Username);
         }
 
+        /// <summary>
+        /// Generates a simulated DataProcessedEvent with random data.
+        /// </summary>
         private static void GenerateDataProcessedEvent()
         {
             string[] sources = { "CustomerDB", "OrdersDB", "InventoryDB", "AnalyticsDB" };
 
             var dataEvent = new DataProcessedEvent
             {
-                DataSource = sources[_random.Next(sources. Length)],
+                DataSource = sources[_random.Next(sources.  Length)],
                 RecordsProcessed = _random.Next(100, 10000),
-                ProcessingTimeMs = _random.NextDouble() * 500,
-                Success = _random.Next(10) != 0
+                ProcessingTimeMs = _random. NextDouble() * 500,
+                Success = _random.Next(10) != 0  // 90% success rate
             };
 
-            if (! dataEvent.Success)
+            if (!  dataEvent.Success)
                 dataEvent.ErrorMessage = "Simulated processing error";
 
             var eventMessage = new EventMessage
             {
-                Topic = EventTopics. DataProcessed,
+                Topic = EventTopics.  DataProcessed,
                 Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime. UtcNow,
+                Timestamp = DateTime.  UtcNow,
                 Source = "EventGenerator"
             };
 
             PublishEvent(eventMessage);
-            Console. WriteLine("[EventGenerator] DataProcessed: " + dataEvent.DataSource);
+            Console.  WriteLine("[EventGenerator] DataProcessed: " + dataEvent.DataSource);
         }
 
+        /// <summary>
+        /// Generates a SystemMetricsEvent with real system data where possible.
+        /// Uses Windows API for CPU and memory, simulates disk activity. 
+        /// </summary>
         private static void GenerateSystemMetricsEvent()
         {
             double cpuUsage = GetCpuUsage();
@@ -306,22 +356,23 @@ namespace EventGeneratorPlugin
                 CpuUsagePercent = cpuUsage,
                 MemoryUsagePercent = memoryUsage,
                 DiskUsagePercent = diskActivity,
-                Timestamp = DateTime. UtcNow
+                Timestamp = DateTime.  UtcNow
             };
 
             var eventMessage = new EventMessage
             {
                 Topic = EventTopics.SystemMetrics,
-                Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy. CamelCase }),
-                Timestamp = DateTime.UtcNow,
+                Payload = JsonSerializer. Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.  CamelCase }),
+                Timestamp = DateTime. UtcNow,
                 Source = "EventGenerator"
             };
 
             PublishEvent(eventMessage);
-            Console.WriteLine("[EventGenerator] SystemMetrics: CPU=" + cpuUsage. ToString("F1") +
-                              "% RAM=" + memoryUsage.ToString("F1") +
+            Console. WriteLine("[EventGenerator] SystemMetrics: CPU=" + cpuUsage.  ToString("F1") +
+                              "% RAM=" + memoryUsage. ToString("F1") +
                               "% Disk=" + diskActivity.ToString("F1") + "%");
 
+            // Check if any metrics exceed thresholds and publish alerts
             CheckThresholds(cpuUsage, memoryUsage, diskActivity);
         }
 
@@ -329,9 +380,14 @@ namespace EventGeneratorPlugin
 
         #region System Metrics Collection
 
+        // Windows API import for CPU time tracking
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool GetSystemTimes(out long idleTime, out long kernelTime, out long userTime);
 
+        /// <summary>
+        /// Gets real CPU usage using Windows API.
+        /// Calculates usage based on difference in idle/total time since last call.
+        /// </summary>
         private static double GetCpuUsage()
         {
             try
@@ -356,6 +412,7 @@ namespace EventGeneratorPlugin
                         }
                     }
 
+                    // First call - initialize tracking
                     _lastTotalTime = totalTime;
                     _lastIdleTime = idleTime;
                     _cpuInitialized = true;
@@ -365,9 +422,11 @@ namespace EventGeneratorPlugin
             }
             catch { }
 
+            // Fallback to simulated value if API fails
             return 10 + (_random.NextDouble() * 20);
         }
 
+        // Windows API structure for memory status
         [StructLayout(LayoutKind.Sequential)]
         private struct MEMORYSTATUSEX
         {
@@ -383,9 +442,12 @@ namespace EventGeneratorPlugin
         }
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
+        [return: MarshalAs(UnmanagedType. Bool)]
         private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
+        /// <summary>
+        /// Gets real system memory usage using Windows API.
+        /// </summary>
         private static double GetSystemMemoryUsage()
         {
             try
@@ -400,35 +462,46 @@ namespace EventGeneratorPlugin
             }
             catch { }
 
-            return 40 + (_random. NextDouble() * 40);
+            // Fallback to simulated value
+            return 40 + (_random.  NextDouble() * 40);
         }
 
+        /// <summary>
+        /// Gets simulated disk activity. 
+        /// Real disk I/O monitoring requires admin privileges or PerformanceCounter
+        /// which causes timeout issues, so we simulate it. 
+        /// </summary>
         private static double GetDiskActivity()
         {
-            // Simulated disk activity - real disk I/O monitoring requires admin or PerformanceCounter
-            // which causes timeout issues
             double baseActivity = 2 + (_random.NextDouble() * 8);
             
+            // Occasionally simulate higher disk activity
             if (_random.Next(20) == 0)
-                baseActivity = 20 + (_random. NextDouble() * 30);
+                baseActivity = 20 + (_random.  NextDouble() * 30);
             
+            // Rarely simulate very high disk activity
             if (_random.Next(50) == 0)
-                baseActivity = 50 + (_random.NextDouble() * 40);
+                baseActivity = 50 + (_random. NextDouble() * 40);
 
             return Math.Min(100, baseActivity);
         }
 
+        /// <summary>
+        /// Checks if metrics exceed thresholds and publishes alerts. 
+        /// </summary>
         private static void CheckThresholds(double cpu, double memory, double disk)
         {
+            // CPU thresholds
             if (cpu > 90)
             {
-                PublishAlert(EventTopics.AlertCritical, "CPU critical: " + cpu.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertCritical, "CPU critical: " + cpu. ToString("F1") + "%");
             }
             else if (cpu > 75)
             {
-                PublishAlert(EventTopics.AlertWarning, "CPU high: " + cpu. ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertWarning, "CPU high: " + cpu.  ToString("F1") + "%");
             }
 
+            // Memory thresholds
             if (memory > 90)
             {
                 PublishAlert(EventTopics.AlertCritical, "Memory critical: " + memory.ToString("F1") + "%");
@@ -438,13 +511,14 @@ namespace EventGeneratorPlugin
                 PublishAlert(EventTopics.AlertWarning, "Memory high: " + memory.ToString("F1") + "%");
             }
 
+            // Disk thresholds
             if (disk > 90)
             {
-                PublishAlert(EventTopics.AlertCritical, "Disk I/O critical: " + disk.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertCritical, "Disk I/O critical: " + disk. ToString("F1") + "%");
             }
             else if (disk > 70)
             {
-                PublishAlert(EventTopics.AlertWarning, "Disk I/O high: " + disk.ToString("F1") + "%");
+                PublishAlert(EventTopics.AlertWarning, "Disk I/O high: " + disk. ToString("F1") + "%");
             }
         }
 
@@ -466,30 +540,36 @@ namespace EventGeneratorPlugin
 
         #region IPC
 
+        /// <summary>
+        /// Publishes an event to the kernel for distribution to other plugins.
+        /// </summary>
         private static void PublishEvent(EventMessage evt)
         {
             try
             {
                 SendMessage(new IpcMessage
                 {
-                    Type = IpcMessageType. Publish,
+                    Type = IpcMessageType.  Publish,
                     PluginName = "EventGenerator",
                     Event = evt
                 });
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[EventGenerator] Publish error: " + ex.Message);
+                Console. WriteLine("[EventGenerator] Publish error: " + ex.Message);
             }
         }
 
+        /// <summary>
+        /// Sends an IPC message to the kernel.
+        /// </summary>
         private static void SendMessage(IpcMessage message)
         {
             try
             {
-                if (_pipeClient != null && _pipeClient. IsConnected)
+                if (_pipeClient != null && _pipeClient.  IsConnected)
                 {
-                    IpcProtocol. WriteMessage(_pipeClient, message);
+                    IpcProtocol.  WriteMessage(_pipeClient, message);
                 }
             }
             catch { }

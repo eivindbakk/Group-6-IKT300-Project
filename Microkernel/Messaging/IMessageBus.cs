@@ -1,15 +1,16 @@
 ﻿using System;
 using Contracts;
 
-namespace Microkernel. Messaging
+namespace Microkernel.Messaging
 {
     /// <summary>
-    /// Message bus interface for pub/sub communication.
+    /// Message bus interface for pub/sub communication. 
+    /// Allows kernel components to subscribe to events. 
     /// </summary>
     public interface IMessageBus
     {
         /// <summary>
-        /// Publish a message to all subscribers. 
+        /// Publish a message to all subscribers.  
         /// </summary>
         void Publish(EventMessage message);
 

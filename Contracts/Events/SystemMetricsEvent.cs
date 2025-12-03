@@ -2,6 +2,10 @@
 
 namespace Contracts.Events
 {
+    /// <summary>
+    /// Contains system performance metrics (CPU, RAM, Disk usage). 
+    /// Published periodically by the EventGenerator plugin.
+    /// </summary>
     public class SystemMetricsEvent
     {
         public string MachineName { get; set; }

@@ -3,17 +3,18 @@
 namespace Contracts.IPC
 {
     /// <summary>
-    /// Message format for IPC communication between kernel and plugin processes. 
+    /// Message format for IPC communication between kernel and plugin processes.
+    /// This is the envelope that wraps all communication over named pipes.
     /// </summary>
     public class IpcMessage
     {
         /// <summary>
-        /// Type of message being sent.
+        /// Type of message being sent (Start, Stop, Event, etc.). 
         /// </summary>
         public IpcMessageType Type { get; set; }
 
         /// <summary>
-        /// Name of the plugin sending or receiving the message. 
+        /// Name of the plugin sending or receiving the message.  
         /// </summary>
         public string PluginName { get; set; }
 
@@ -33,17 +34,17 @@ namespace Contracts.IPC
         public string Response { get; set; }
 
         /// <summary>
-        /// Error message (used when Type is Error). 
+        /// Error message (used when Type is Error).  
         /// </summary>
         public string ErrorMessage { get; set; }
 
         /// <summary>
-        /// Error code for categorizing errors (used when Type is Error).
+        /// Error code for categorizing errors (used when Type is Error). 
         /// </summary>
         public int ErrorCode { get; set; }
 
         /// <summary>
-        /// When the message was created. 
+        /// When the message was created.  
         /// </summary>
         public DateTime Timestamp { get; set; }
 
@@ -53,7 +54,7 @@ namespace Contracts.IPC
         }
 
         /// <summary>
-        /// Creates an error message. 
+        /// Factory method to create an error message.
         /// </summary>
         public static IpcMessage CreateError(string pluginName, string errorMessage, int errorCode = 0)
         {
@@ -69,11 +70,12 @@ namespace Contracts.IPC
 
     /// <summary>
     /// Types of IPC messages exchanged between kernel and plugins.
+    /// Defines the protocol for kernel-plugin communication.
     /// </summary>
     public enum IpcMessageType
     {
         /// <summary>
-        /// Kernel tells plugin to start/initialize.
+        /// Kernel tells plugin to start/initialize. 
         /// </summary>
         Start,
 
@@ -93,7 +95,7 @@ namespace Contracts.IPC
         Publish,
 
         /// <summary>
-        /// Plugin sends heartbeat to kernel (keep-alive). 
+        /// Plugin sends heartbeat to kernel (keep-alive).  
         /// </summary>
         Heartbeat,
 
@@ -103,12 +105,12 @@ namespace Contracts.IPC
         Shutdown,
 
         /// <summary>
-        /// Plugin acknowledges a command from the kernel.
+        /// Plugin acknowledges a command from the kernel. 
         /// </summary>
         Ack,
 
         /// <summary>
-        /// Plugin reports an error to the kernel. 
+        /// Plugin reports an error to the kernel.  
         /// </summary>
         Error
     }

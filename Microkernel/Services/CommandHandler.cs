@@ -9,10 +9,16 @@ using Microkernel.Core;
 
 namespace Microkernel.Services
 {
+    /// <summary>
+    /// Handles CLI commands entered by the user. 
+    /// Parses input and dispatches to appropriate handlers.
+    /// </summary>
     public class CommandHandler
     {
         private readonly IKernel _kernel;
         private readonly Random _random = new Random();
+        
+        // Static flags for output control and generation state
         private static bool _muted = false;
         private static bool _generating = false;
 
@@ -32,18 +38,23 @@ namespace Microkernel.Services
             if (_muted) return;
             Console.ForegroundColor = color;
             Console.WriteLine(message);
-            Console. ResetColor();
+            Console.ResetColor();
         }
 
+        /// <summary>
+        /// Processes a user command.  Returns true if the kernel should exit.
+        /// </summary>
         public bool ProcessCommand(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
                 return false;
 
+            // Split command and arguments
             string[] parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
             string command = parts[0]. ToLowerInvariant();
             string args = parts.Length > 1 ? parts[1] : "";
 
+            // Dispatch to appropriate handler
             switch (command)
             {
                 case "help":
@@ -124,6 +135,9 @@ namespace Microkernel.Services
             }
         }
 
+        /// <summary>
+        /// Shows help - either general or topic-specific.
+        /// </summary>
         private void ShowHelp(string args)
         {
             string topic = args.ToLowerInvariant(). Trim();
@@ -236,7 +250,7 @@ namespace Microkernel.Services
             Print("  - UserLoggedInEvent   -> USER_LOGIN | User: X | IP: X. X.X.X");
             Print("  - DataProcessedEvent  -> DATA_PROCESSED | Source: X | Records: N");
             Print("  - SystemMetricsEvent  -> SYSTEM_METRICS | CPU: X% | RAM: X% | Disk: X%");
-            Print("  - Custom events       -> EVENT | Topic: X | Payload: .. .");
+            Print("  - Custom events       -> EVENT | Topic: X | Payload: ...");
             Print("");
             Print("This plugin has no commands - it automatically logs all received events.");
             Print("");
@@ -247,17 +261,20 @@ namespace Microkernel.Services
             var (total, running, faulted) = _kernel.GetPluginCounts();
 
             Print("");
-            Print("Kernel Status: " + _kernel.State);
+            Print("Kernel Status: " + _kernel. State);
             Print("Plugins: " + total + " total, " + running + " running, " + faulted + " faulted");
             Print("Event Generation: " + (_generating ? "ON" : "OFF"));
             Print("");
         }
 
+        /// <summary>
+        /// Lists all loaded plugins with their status.
+        /// </summary>
         private void ListPlugins()
         {
-            var plugins = _kernel. GetLoadedPlugins();
+            var plugins = _kernel.GetLoadedPlugins();
 
-            if (plugins.Count == 0)
+            if (plugins. Count == 0)
             {
                 Print("No plugins loaded.");
                 return;
@@ -271,25 +288,29 @@ namespace Microkernel.Services
             {
                 if (! _muted)
                 {
+                    // Color-code based on state
                     var color = plugin.State == "Running" ? ConsoleColor.Green :
                                plugin.State == "Faulted" ? ConsoleColor. Red : ConsoleColor.Yellow;
 
                     Console.ForegroundColor = color;
                     Console.WriteLine(string.Format("{0,-28} {1,-10} {2,-8} {3:HH:mm:ss}",
-                        plugin.Name, plugin. State, plugin.ProcessId, plugin.LoadedAt));
+                        plugin.Name, plugin.State, plugin.ProcessId, plugin.LoadedAt));
                     Console.ResetColor();
                 }
             }
             Print("");
         }
 
+        /// <summary>
+        /// Runs a demo sequence sending all required event types.
+        /// </summary>
         private void RunDemo()
         {
             Print("");
             Print("=== Running Demo ===");
             Print("");
 
-            Print("1.  Sending UserLoggedInEvent.. .");
+            Print("1. Sending UserLoggedInEvent...");
             SendUserLoggedInEvent("");
             Thread.Sleep(300);
 
@@ -308,6 +329,9 @@ namespace Microkernel.Services
             Print("");
         }
 
+        /// <summary>
+        /// Handles the 'generate' command for controlling the EventGenerator plugin.
+        /// </summary>
         private void HandleGenerate(string args)
         {
             string trimmedArgs = (args ??  "").Trim(). ToLowerInvariant();
@@ -357,11 +381,12 @@ namespace Microkernel.Services
                 return;
             }
 
+            // Try to parse as interval in milliseconds
             if (int.TryParse(trimmedArgs, out int interval) && interval >= 100)
             {
                 SetInterval(interval);
 
-                if (!_generating)
+                if (! _generating)
                 {
                     StartGeneration();
                 }
@@ -385,13 +410,16 @@ namespace Microkernel.Services
             Print("");
             Print("Examples:");
             Print("  generate 1000         Generate events every 1 second");
-            Print("  generate 500          Generate events every 0. 5 seconds");
+            Print("  generate 500          Generate events every 0.5 seconds");
             Print("  generate 5000         Generate events every 5 seconds");
             Print("");
             Print("Status: Generation is " + (_generating ? "ON" : "OFF"));
             Print("");
         }
 
+        /// <summary>
+        /// Sends generator. start event to the EventGenerator plugin.
+        /// </summary>
         private void StartGeneration()
         {
             _generating = true;
@@ -400,11 +428,11 @@ namespace Microkernel.Services
             {
                 Topic = EventTopics.GeneratorStart,
                 Payload = "",
-                Timestamp = DateTime. UtcNow,
+                Timestamp = DateTime.UtcNow,
                 Source = "Console"
             };
             _kernel. Publish(startEvt);
-            PrintColor("Event generation started.", ConsoleColor. Green);
+            PrintColor("Event generation started.", ConsoleColor.Green);
         }
 
         private void StopGeneration()
@@ -431,14 +459,17 @@ namespace Microkernel.Services
                 Timestamp = DateTime.UtcNow,
                 Source = "Console"
             };
-            _kernel. Publish(intervalEvt);
+            _kernel.Publish(intervalEvt);
             Print("Interval set to " + interval + "ms");
         }
 
+        /// <summary>
+        /// Creates and publishes a UserLoggedInEvent with random or specified username.
+        /// </summary>
         private void SendUserLoggedInEvent(string username)
         {
             string[] names = { "alice", "bob", "charlie", "diana", "eve" };
-            string[] ips = { "192.168.1.100", "10.0.0.50", "172.16.0.25" };
+            string[] ips = { "192.168.1. 100", "10.0.0. 50", "172.16.0.25" };
 
             var userEvent = new UserLoggedInEvent
             {
@@ -455,7 +486,7 @@ namespace Microkernel.Services
                 Source = "Console"
             };
 
-            _kernel.Publish(evt);
+            _kernel. Publish(evt);
             Print("  -> User: " + userEvent.Username + ", IP: " + userEvent.IpAddress);
         }
 
@@ -474,7 +505,7 @@ namespace Microkernel.Services
                 DataSource = sources[_random.Next(sources. Length)],
                 RecordsProcessed = recordCount > 0 ? recordCount : _random.Next(100, 5000),
                 ProcessingTimeMs = _random. NextDouble() * 1000,
-                Success = _random.Next(10) != 0
+                Success = _random.Next(10) != 0  // 90% success rate
             };
 
             if (! dataEvent.Success)
@@ -484,7 +515,7 @@ namespace Microkernel.Services
             {
                 Topic = EventTopics.DataProcessed,
                 Payload = JsonSerializer.Serialize(dataEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
-                Timestamp = DateTime. UtcNow,
+                Timestamp = DateTime.UtcNow,
                 Source = "Console"
             };
 
@@ -494,10 +525,12 @@ namespace Microkernel.Services
 
         private void SendSystemMetricsEvent()
         {
-            double cpu = 20 + _random. NextDouble() * 60;
+            // Generate somewhat realistic random metrics
+            double cpu = 20 + _random.NextDouble() * 60;
             double ram = 40 + _random. NextDouble() * 40;
             double disk = 50 + _random. NextDouble() * 30;
 
+            // Try to get real disk usage
             try
             {
                 var drive = new DriveInfo("C");
@@ -511,13 +544,13 @@ namespace Microkernel.Services
                 CpuUsagePercent = cpu,
                 MemoryUsagePercent = ram,
                 DiskUsagePercent = disk,
-                Timestamp = DateTime. UtcNow
+                Timestamp = DateTime.UtcNow
             };
 
             var evt = new EventMessage
             {
                 Topic = EventTopics.SystemMetrics,
-                Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+                Payload = JsonSerializer.Serialize(metricsEvent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy. CamelCase }),
                 Timestamp = DateTime.UtcNow,
                 Source = "Console"
             };
@@ -530,7 +563,7 @@ namespace Microkernel.Services
         {
             var parts = args.Split(' ', 2);
             string topic = parts[0];
-            string payload = parts.Length > 1 ? parts[1] : "";
+            string payload = parts. Length > 1 ? parts[1] : "";
 
             if (string.IsNullOrWhiteSpace(topic))
             {
@@ -550,6 +583,9 @@ namespace Microkernel.Services
             Print("Event sent: " + topic);
         }
 
+        /// <summary>
+        /// Dynamically loads a plugin at runtime.
+        /// </summary>
         private void LoadPlugin(string args)
         {
             if (string.IsNullOrWhiteSpace(args))
@@ -562,6 +598,7 @@ namespace Microkernel.Services
             string input = args.Trim();
             string exePath;
 
+            // Determine the executable path
             if (Path.IsPathRooted(input))
             {
                 exePath = input;
@@ -630,7 +667,7 @@ namespace Microkernel.Services
 
             Print("Unloading plugin: " + match. Name);
 
-            if (_kernel.UnloadPlugin(match.Name))
+            if (_kernel. UnloadPlugin(match.Name))
             {
                 PrintColor("Plugin unloaded.", ConsoleColor.Green);
             }
@@ -640,6 +677,10 @@ namespace Microkernel.Services
             }
         }
 
+        /// <summary>
+        /// Forcibly kills a plugin for fault isolation testing.
+        /// Demonstrates that the kernel continues running when a plugin crashes.
+        /// </summary>
         private void CrashPlugin(string pluginName)
         {
             if (string.IsNullOrWhiteSpace(pluginName))
@@ -649,8 +690,8 @@ namespace Microkernel.Services
             }
 
             var plugins = _kernel.GetLoadedPlugins();
-            var match = plugins. FirstOrDefault(p =>
-                p. Name.Contains(pluginName, StringComparison.OrdinalIgnoreCase));
+            var match = plugins.FirstOrDefault(p =>
+                p.Name.Contains(pluginName, StringComparison.OrdinalIgnoreCase));
 
             if (match == null)
             {
@@ -658,11 +699,11 @@ namespace Microkernel.Services
                 return;
             }
 
-            Print("Crashing plugin: " + match. Name);
+            Print("Crashing plugin: " + match.Name);
 
             if (_kernel.CrashPlugin(match. Name))
             {
-                PrintColor("Plugin crashed.  Kernel and other plugins continue running.", ConsoleColor. Yellow);
+                PrintColor("Plugin crashed.  Kernel and other plugins continue running.", ConsoleColor.Yellow);
             }
             else
             {
@@ -702,7 +743,7 @@ namespace Microkernel.Services
 
         private void ToggleDebug(string args)
         {
-            if (args.Equals("on", StringComparison.OrdinalIgnoreCase))
+            if (args. Equals("on", StringComparison.OrdinalIgnoreCase))
             {
                 ConsoleKernelLogger.EnableDebug();
                 Print("Debug output enabled.");

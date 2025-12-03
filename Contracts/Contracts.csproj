@@ -2,7 +2,9 @@
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
+        <!-- Explicit using statements required -->
         <ImplicitUsings>disable</ImplicitUsings>
+        <!-- Nullable reference types disabled -->
         <Nullable>disable</Nullable>
     </PropertyGroup>
 

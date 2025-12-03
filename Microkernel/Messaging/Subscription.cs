@@ -1,30 +1,19 @@
 ﻿using System;
 using Contracts;
 
-namespace Microkernel. Messaging
+namespace Microkernel.Messaging
 {
     /// <summary>
     /// Represents an active subscription to the message bus.
-    /// Thread-safe and disposable.
+    /// Implements IDisposable for automatic cleanup when disposed.
     /// </summary>
     internal sealed class Subscription : IDisposable
     {
         private readonly Action<Guid> _unsubscribe;
         private volatile bool _disposed;
 
-        /// <summary>
-        /// Unique identifier for this subscription. 
-        /// </summary>
         public Guid Id { get; }
-
-        /// <summary>
-        /// Topic pattern to match (supports * wildcard).
-        /// </summary>
         public string TopicPattern { get; }
-
-        /// <summary>
-        /// Handler invoked when a matching message is published.
-        /// </summary>
         public Action<EventMessage> Handler { get; }
 
         public Subscription(string topicPattern, Action<EventMessage> handler, Action<Guid> unsubscribe)
@@ -37,16 +26,17 @@ namespace Microkernel. Messaging
 
         /// <summary>
         /// Checks if a topic matches this subscription's pattern. 
+        /// Supports wildcard (*) matching.
         /// </summary>
         public bool Matches(string topic)
         {
             // Null or empty pattern matches everything
-            if (string. IsNullOrEmpty(TopicPattern) || TopicPattern == "*")
+            if (string.IsNullOrEmpty(TopicPattern) || TopicPattern == "*")
             {
                 return true;
             }
 
-            // Wildcard at end: "metrics.*" matches "metrics. system", "metrics.cpu", etc.
+            // Wildcard at end: "metrics.*" matches "metrics.system", "metrics.cpu", etc.
             if (TopicPattern.EndsWith("*"))
             {
                 var prefix = TopicPattern. TrimEnd('*');
@@ -57,6 +47,9 @@ namespace Microkernel. Messaging
             return string.Equals(TopicPattern, topic, StringComparison. OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Disposing the subscription automatically unsubscribes from the message bus.
+        /// </summary>
         public void Dispose()
         {
             if (_disposed)

@@ -1,5 +1,8 @@
 ﻿namespace Microkernel. Services
 {
+    /// <summary>
+    /// Logging interface used throughout the kernel.
+    /// </summary>
     public interface IKernelLogger
     {
         void Debug(string message);

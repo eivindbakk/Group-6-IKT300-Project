@@ -2,10 +2,16 @@
 
 namespace Microkernel.Services
 {
+    /// <summary>
+    /// Simple console logger with timestamp and log level formatting.
+    /// Supports debug mode toggle and output muting.
+    /// </summary>
     public class ConsoleKernelLogger : IKernelLogger
     {
         private static bool _debugEnabled = false;
         private static bool _muted = false;
+        
+        // Optional custom output handler (used by Program.cs for clean console output)
         private static Action<string> _outputHandler = null;
 
         public static void SetOutputHandler(Action<string> handler)
@@ -38,19 +44,19 @@ namespace Microkernel.Services
             }
             else
             {
-                Console.WriteLine(message);
+                Console. WriteLine(message);
             }
         }
 
         public void Info(string message)
         {
-            string line = "[" + DateTime.Now. ToString("HH:mm:ss. fff") + "] [INFO ] " + message;
+            string line = "[" + DateTime.Now. ToString("HH:mm:ss.fff") + "] [INFO ] " + message;
             Output(line);
         }
 
         public void Warn(string message)
         {
-            string line = "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] [WARN ] " + message;
+            string line = "[" + DateTime.Now. ToString("HH:mm:ss.fff") + "] [WARN ] " + message;
             Output(line);
         }
 
@@ -62,8 +68,9 @@ namespace Microkernel.Services
 
         public void Debug(string message)
         {
+            // Debug messages only shown when debug mode is enabled
             if (! _debugEnabled) return;
-            string line = "[" + DateTime.Now.ToString("HH:mm:ss. fff") + "] [DEBUG] " + message;
+            string line = "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] [DEBUG] " + message;
             Output(line);
         }
     }

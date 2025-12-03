@@ -2,6 +2,9 @@
 
 namespace Microkernel.Core
 {
+    /// <summary>
+    /// Information about a loaded plugin, used for status display.
+    /// </summary>
     public class PluginInfo
     {
         public string Name { get; set; }

@@ -3,7 +3,7 @@
 namespace Contracts.Events
 {
     /// <summary>
-    /// Event raised when a user logs in (required by assignment).
+    /// Event raised when a user logs in.
     /// </summary>
     public class UserLoggedInEvent
     {
@@ -11,12 +11,15 @@ namespace Contracts.Events
         public string Username { get; set; }
         public DateTime LoginTime { get; set; }
         public string IpAddress { get; set; }
+        
+        // Unique session identifier for tracking
         public string SessionId { get; set; }
 
         public UserLoggedInEvent()
         {
-            LoginTime = DateTime.UtcNow;
-            SessionId = Guid. NewGuid().ToString();
+            // Auto-set login time and generate session ID
+            LoginTime = DateTime. UtcNow;
+            SessionId = Guid.NewGuid().ToString();
         }
     }
 }

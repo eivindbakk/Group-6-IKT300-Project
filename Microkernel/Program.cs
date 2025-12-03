@@ -1,25 +1,36 @@
 using System;
-using System. Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 using System. Linq;
-using System.  Threading;
+using System.Threading;
 using Microkernel.Core;
 using Microkernel.Services;
 
 namespace Microkernel
 {
+    /// <summary>
+    /// Main entry point for the Microkernel application. 
+    /// Provides an interactive CLI with command history, tab completion, and clean output handling.
+    /// </summary>
     class Program
     {
         private static Kernel _kernel;
         private static CommandHandler _commandHandler;
+        
+        // Input state
         private static string _currentInput = "";
         private static int _cursorPosition = 0;
+        
+        // Command history for up/down arrow navigation
         private static List<string> _commandHistory = new List<string>();
         private static int _historyIndex = 0;
+        
+        // Console synchronization
         private static readonly object _consoleLock = new object();
         private static int _inputLineRow = 0;
         private static bool _running = true;
 
+        // Available commands for tab completion
         private static readonly string[] Commands = {
             "help", "status", "plugins", "demo", "userlogin", "dataprocessed",
             "metrics", "send", "generate", "load", "unload", "crash", "restart",
@@ -34,20 +45,20 @@ namespace Microkernel
             PrintBanner();
 
             // Create kernel and command handler
-            _kernel = Kernel. CreateDefault();
+            _kernel = Kernel.CreateDefault();
             _commandHandler = new CommandHandler(_kernel);
 
-            // Start kernel (this loads plugins)
-            _kernel. Start();
+            // Start kernel (this discovers and launches plugins)
+            _kernel.Start();
 
-            // Wait for plugins to connect
-            Thread.Sleep(1000);
+            // Wait for plugins to connect via named pipes
+            Thread. Sleep(1000);
 
-            // Now print help and set up input
             Console.WriteLine();
             PrintStartupInfo();
 
-            // Hook up output redirection AFTER startup info is printed
+            // Redirect kernel log output through our clean output handler
+            // This ensures log messages don't corrupt the input line
             ConsoleKernelLogger.SetOutputHandler(WriteOutput);
 
             _inputLineRow = Console.CursorTop;
@@ -58,6 +69,9 @@ namespace Microkernel
             _kernel.Stop();
         }
 
+        /// <summary>
+        /// Prints the ASCII art banner. 
+        /// </summary>
         private static void PrintBanner()
         {
             Console.ForegroundColor = ConsoleColor. Cyan;
@@ -74,21 +88,24 @@ namespace Microkernel
             Console.WriteLine();
         }
 
+        /// <summary>
+        /// Prints the startup help information.
+        /// </summary>
         private static void PrintStartupInfo()
         {
             Console. ForegroundColor = ConsoleColor.White;
             Console. WriteLine("Available Commands:");
-            Console.WriteLine("-------------------");
+            Console. WriteLine("-------------------");
             Console.ResetColor();
             Console.WriteLine("  help                  Show this help message");
             Console.WriteLine("  status                Show kernel status");
             Console.WriteLine("  plugins               List all loaded plugins");
-            Console. WriteLine("  demo                  Run demo with required events");
-            Console.WriteLine("  userlogin [name]      Send a UserLoggedInEvent");
+            Console.WriteLine("  demo                  Run demo with required events");
+            Console. WriteLine("  userlogin [name]      Send a UserLoggedInEvent");
             Console.WriteLine("  dataprocessed [n]     Send a DataProcessedEvent");
-            Console.WriteLine("  send <topic> [data]   Publish a custom event");
-            Console. WriteLine("  load <path>           Load a plugin executable");
-            Console.WriteLine("  unload <plugin>       Unload a plugin");
+            Console. WriteLine("  send <topic> [data]   Publish a custom event");
+            Console.WriteLine("  load <path>           Load a plugin executable");
+            Console. WriteLine("  unload <plugin>       Unload a plugin");
             Console.WriteLine("  crash <plugin>        Kill a plugin (fault isolation test)");
             Console.WriteLine("  restart <plugin>      Restart a plugin");
             Console.WriteLine("  debug on|off          Toggle debug output");
@@ -97,26 +114,39 @@ namespace Microkernel
             Console.WriteLine();
         }
 
+        /// <summary>
+        /// Thread-safe output method that handles concurrent log messages.
+        /// Preserves the user's current input while printing messages above it.
+        /// This is the key to having clean console output with background events.
+        /// </summary>
         public static void WriteOutput(string message)
         {
             lock (_consoleLock)
             {
+                // Save current input state
                 string savedInput = _currentInput;
                 int savedCursor = _cursorPosition;
 
+                // Clear the input line
                 ClearInputLine();
 
+                // Print the message above the input line
                 Console.SetCursorPosition(0, _inputLineRow);
                 Console.WriteLine(message);
 
-                _inputLineRow = Console. CursorTop;
+                // Update input line position
+                _inputLineRow = Console.CursorTop;
 
+                // Restore input state
                 _currentInput = savedInput;
                 _cursorPosition = savedCursor;
                 RedrawInputLine();
             }
         }
 
+        /// <summary>
+        /// Clears the current input line.
+        /// </summary>
         private static void ClearInputLine()
         {
             try
@@ -128,6 +158,9 @@ namespace Microkernel
             catch { }
         }
 
+        /// <summary>
+        /// Redraws the input line with the prompt and current input.
+        /// </summary>
         private static void RedrawInputLine()
         {
             try
@@ -139,6 +172,9 @@ namespace Microkernel
             catch { }
         }
 
+        /// <summary>
+        /// Main input loop - polls for key presses and dispatches to handlers.
+        /// </summary>
         private static void RunInputLoop()
         {
             while (_running)
@@ -165,11 +201,15 @@ namespace Microkernel
             }
         }
 
+        /// <summary>
+        /// Handles individual key presses including special keys
+        /// (arrows, tab completion, command history, etc.). 
+        /// </summary>
         private static void HandleKeyPress(ConsoleKeyInfo key)
         {
             switch (key.Key)
             {
-                case ConsoleKey. Enter:
+                case ConsoleKey.Enter:
                     HandleEnter();
                     break;
 
@@ -189,7 +229,7 @@ namespace Microkernel
                     }
                     break;
 
-                case ConsoleKey.RightArrow:
+                case ConsoleKey. RightArrow:
                     if (_cursorPosition < _currentInput.Length)
                     {
                         _cursorPosition++;
@@ -197,6 +237,7 @@ namespace Microkernel
                     }
                     break;
 
+                // Command history navigation
                 case ConsoleKey. UpArrow:
                     HandleUpArrow();
                     break;
@@ -205,11 +246,12 @@ namespace Microkernel
                     HandleDownArrow();
                     break;
 
+                // Tab completion
                 case ConsoleKey.Tab:
                     HandleTabCompletion();
                     break;
 
-                case ConsoleKey. Home:
+                case ConsoleKey.Home:
                     _cursorPosition = 0;
                     RedrawInputLine();
                     break;
@@ -219,16 +261,18 @@ namespace Microkernel
                     RedrawInputLine();
                     break;
 
-                case ConsoleKey.Escape:
+                case ConsoleKey. Escape:
+                    // Clear current input
                     _currentInput = "";
                     _cursorPosition = 0;
                     RedrawInputLine();
                     break;
 
                 default:
+                    // Regular character input
                     if (! char.IsControl(key.KeyChar))
                     {
-                        _currentInput = _currentInput.Insert(_cursorPosition, key.KeyChar. ToString());
+                        _currentInput = _currentInput. Insert(_cursorPosition, key.KeyChar.ToString());
                         _cursorPosition++;
                         RedrawInputLine();
                     }
@@ -236,6 +280,9 @@ namespace Microkernel
             }
         }
 
+        /// <summary>
+        /// Handles Enter key - executes the current command. 
+        /// </summary>
         private static void HandleEnter()
         {
             string input = _currentInput. Trim();
@@ -245,17 +292,20 @@ namespace Microkernel
             ClearInputLine();
             _inputLineRow++;
 
-            if (_inputLineRow >= Console. BufferHeight - 1)
+            // Handle buffer overflow
+            if (_inputLineRow >= Console.BufferHeight - 1)
             {
-                _inputLineRow = Console.BufferHeight - 2;
+                _inputLineRow = Console. BufferHeight - 2;
             }
 
             if (! string.IsNullOrEmpty(input))
             {
+                // Add to command history
                 _commandHistory.Add(input);
                 _historyIndex = _commandHistory.Count;
 
-                bool shouldExit = _commandHandler.ProcessCommand(input);
+                // Process the command
+                bool shouldExit = _commandHandler. ProcessCommand(input);
                 if (shouldExit)
                 {
                     _running = false;
@@ -286,6 +336,9 @@ namespace Microkernel
             }
         }
 
+        /// <summary>
+        /// Navigate backward through command history. 
+        /// </summary>
         private static void HandleUpArrow()
         {
             if (_historyIndex > 0)
@@ -297,6 +350,9 @@ namespace Microkernel
             }
         }
 
+        /// <summary>
+        /// Navigate forward through command history. 
+        /// </summary>
         private static void HandleDownArrow()
         {
             if (_historyIndex < _commandHistory.Count - 1)
@@ -308,6 +364,7 @@ namespace Microkernel
             }
             else if (_historyIndex == _commandHistory.Count - 1)
             {
+                // At the end of history - clear to empty input
                 _historyIndex = _commandHistory.Count;
                 _currentInput = "";
                 _cursorPosition = 0;
@@ -315,19 +372,25 @@ namespace Microkernel
             }
         }
 
+        /// <summary>
+        /// Implements tab completion for commands and plugin names. 
+        /// Completes commands, plugin names for crash/restart/unload, and arguments for debug/generate. 
+        /// </summary>
         private static void HandleTabCompletion()
         {
-            string input = _currentInput. ToLowerInvariant(). TrimStart();
+            string input = _currentInput.ToLowerInvariant(). TrimStart();
             var matches = new List<string>();
 
-            string[] parts = input. Split(' ', 2);
+            string[] parts = input.Split(' ', 2);
             string command = parts[0];
             string partialArg = parts. Length > 1 ? parts[1] : null;
 
             if (partialArg != null)
             {
+                // Complete arguments for specific commands
                 if (command == "crash" || command == "restart" || command == "unload")
                 {
+                    // Complete plugin names
                     var plugins = _kernel.GetLoadedPlugins();
                     foreach (var plugin in plugins)
                     {
@@ -340,35 +403,41 @@ namespace Microkernel
                 }
                 else if (command == "debug")
                 {
-                    if ("on". StartsWith(partialArg)) matches. Add("debug on");
+                    // Complete debug on/off
+                    if ("on".StartsWith(partialArg)) matches.Add("debug on");
                     if ("off".StartsWith(partialArg)) matches.Add("debug off");
                 }
                 else if (command == "generate")
                 {
-                    if ("start". StartsWith(partialArg)) matches. Add("generate start");
+                    // Complete generate subcommands
+                    if ("start".StartsWith(partialArg)) matches.Add("generate start");
                     if ("stop".StartsWith(partialArg)) matches.Add("generate stop");
                     if ("toggle".StartsWith(partialArg)) matches.Add("generate toggle");
                 }
             }
             else
             {
+                // Complete command names
                 foreach (var cmd in Commands)
                 {
-                    if (cmd. StartsWith(command))
+                    if (cmd.StartsWith(command))
                     {
                         matches.Add(cmd);
                     }
                 }
             }
 
+            // Apply completion
             if (matches.Count == 1)
             {
+                // Single match - complete it
                 _currentInput = matches[0];
                 _cursorPosition = _currentInput.Length;
                 RedrawInputLine();
             }
-            else if (matches.Count > 1)
+            else if (matches. Count > 1)
             {
+                // Multiple matches - show options
                 WriteOutput(string.Join("  ", matches));
             }
         }

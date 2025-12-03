@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
+        <!-- Console application -->
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>
@@ -9,6 +10,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- Reference to shared contracts (events, IPC protocol) -->
         <ProjectReference Include="..\Contracts\Contracts.csproj" />
     </ItemGroup>
 
